@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+dist/
+build/
+.next/
+out/
+vite.config.*.timestamp*
+
+# env / secrets (never push real credentials)
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# misc
+.DS_Store
+*.pem
+coverage/
+test-results/.tmp/
+tmp/
+Temp/

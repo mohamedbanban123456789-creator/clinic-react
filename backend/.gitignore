@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.local
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+prisma/*.db
+prisma/*.db-journal
+data/scribe-audio/

@@ -1,0 +1,478 @@
+import { randomUUID } from 'node:crypto';
+import type { Prisma, PrismaClient } from '@prisma/client';
+import { prisma } from '../../common/prisma.js';
+import { AppError } from '../../common/errors/AppError.js';
+import { writeAudit } from '../../common/audit.js';
+import { sha256Hex } from '../../common/crypto/vault.js';
+import type {
+  AddendumInput,
+  ChartQuery,
+  CreateEncounterInput,
+  PatchEncounterInput,
+  SignEncounterInput,
+} from './encounter.validators.js';
+
+export interface DoctorActor {
+  readonly userId: string;
+  readonly role: 'DOCTOR' | 'SECRETARY';
+}
+
+type Db = PrismaClient | Prisma.TransactionClient;
+
+async function assertPatientExists(db: Db, patientId: string): Promise<void> {
+  const row = await (db as PrismaClient).patient.findUnique({
+    where: { id: patientId },
+    select: { id: true },
+  });
+  if (row === null) throw new AppError('NOT_FOUND', 'Patient not found');
+}
+
+function toSoapDto(row: {
+  soapSubjective: string | null;
+  soapObjective: string | null;
+  soapAssessment: string | null;
+  soapPlan: string | null;
+}): { S: string | null; O: string | null; A: string | null; P: string | null } {
+  return { S: row.soapSubjective, O: row.soapObjective, A: row.soapAssessment, P: row.soapPlan };
+}
+
+function isCompleteSoap(soap: { S: string | null; O: string | null; A: string | null; P: string | null }): boolean {
+  return (
+    soap.S !== null && soap.S.trim().length > 0 &&
+    soap.O !== null && soap.O.trim().length > 0 &&
+    soap.A !== null && soap.A.trim().length > 0 &&
+    soap.P !== null && soap.P.trim().length > 0
+  );
+}
+
+function computeFinalHash(params: {
+  encounterId: string;
+  patientId: string;
+  soap: { S: string; O: string; A: string; P: string };
+  mse: { appearance: string; behavior: string; speechCoherence: string; moodAffect: string };
+  diagnoses: string[];
+}): string {
+  const canonical = JSON.stringify({
+    encounterId: params.encounterId,
+    patientId: params.patientId,
+    S: params.soap.S,
+    O: params.soap.O,
+    A: params.soap.A,
+    P: params.soap.P,
+    mse: params.mse,
+    diagnoses: [...params.diagnoses].sort(),
+  });
+  return sha256Hex(canonical);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/ehr/encounters [DOCTOR] — MANUAL DRAFT, independent of scribe.
+// ---------------------------------------------------------------------------
+export async function createEncounter(
+  input: CreateEncounterInput,
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{ encounterId: string; status: 'DRAFT'; rowVersion: number }> {
+  await assertPatientExists(db, input.patientId);
+  const visitDate = new Date(input.visitDate);
+  const row = await db.encounter.create({
+    data: {
+      patientId: input.patientId,
+      queueEntryRef: input.queueEntryId ?? null,
+      source: 'MANUAL',
+      visitDate,
+      encounterType: input.encounterType,
+      soapSubjective: input.soap?.S ?? null,
+      soapObjective: input.soap?.O ?? null,
+      soapAssessment: input.soap?.A ?? null,
+      soapPlan: input.soap?.P ?? null,
+      mseAppearance: input.mse.appearance,
+      mseBehavior: input.mse.behavior,
+      mseSpeechCoherence: input.mse.speechCoherence,
+      mseMoodAffect: input.mse.moodAffect,
+      diagnoses: input.diagnoses ?? [],
+      status: 'DRAFT',
+      rowVersion: 1,
+    },
+    select: { id: true, status: true, rowVersion: true },
+  });
+  await writeAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'ENCOUNTER_CREATE',
+    entityType: 'Encounter',
+    entityId: row.id,
+    requestId: randomUUID(),
+    afterState: { status: 'DRAFT', rowVersion: 1, patientId: input.patientId },
+  });
+  return { encounterId: row.id, status: 'DRAFT', rowVersion: row.rowVersion };
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/ehr/encounters/:id [DOCTOR] — full details (DOCTOR-only).
+// ---------------------------------------------------------------------------
+export async function getEncounter(
+  id: string,
+  _actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{
+  encounterId: string;
+  patientId: string;
+  visitDate: string | null;
+  encounterType: string | null;
+  queueEntryId: string | null;
+  source: string;
+  status: string;
+  rowVersion: number;
+  soap: { S: string | null; O: string | null; A: string | null; P: string | null };
+  mse: { appearance: string; behavior: string; speechCoherence: string; moodAffect: string };
+  diagnoses: string[];
+  signedAt: string | null;
+  signedByUserId: string | null;
+  finalContentHash: string | null;
+  addenda: Array<{ id: string; version: number; text: string; reasonCode: string; createdAt: string }>;
+  createdAt: string;
+  updatedAt: string;
+}> {
+  const row = await db.encounter.findUnique({
+    where: { id },
+    include: { addenda: { orderBy: { version: 'asc' } } },
+  });
+  if (row === null) throw new AppError('NOT_FOUND', 'Encounter not found');
+  const diagnoses = Array.isArray(row.diagnoses) ? (row.diagnoses as string[]) : [];
+  return {
+    encounterId: row.id,
+    patientId: row.patientId,
+    visitDate: row.visitDate?.toISOString() ?? null,
+    encounterType: row.encounterType,
+    queueEntryId: row.queueEntryRef,
+    source: row.source,
+    status: row.status,
+    rowVersion: row.rowVersion,
+    soap: toSoapDto(row),
+    mse: {
+      appearance: row.mseAppearance,
+      behavior: row.mseBehavior,
+      speechCoherence: row.mseSpeechCoherence,
+      moodAffect: row.mseMoodAffect,
+    },
+    diagnoses,
+    signedAt: row.signedAt?.toISOString() ?? null,
+    signedByUserId: row.signedByUserId,
+    finalContentHash: row.finalContentHash,
+    addenda: row.addenda.map((a) => ({
+      id: a.id,
+      version: a.version,
+      text: a.text,
+      reasonCode: a.reasonCode,
+      createdAt: a.createdAt.toISOString(),
+    })),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /api/v1/ehr/encounters/:id [DOCTOR] — DRAFT-only, OCC via If-Match.
+// ---------------------------------------------------------------------------
+export async function patchEncounter(
+  id: string,
+  input: PatchEncounterInput,
+  ifMatchRowVersion: number,
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{ encounterId: string; status: string; rowVersion: number }> {
+  const cur = await db.encounter.findUnique({ where: { id } });
+  if (cur === null) throw new AppError('NOT_FOUND', 'Encounter not found');
+  if (cur.status === 'SIGNED') {
+    throw new AppError('ALREADY_SIGNED', 'Signed encounters are immutable; use addenda');
+  }
+  if (cur.rowVersion !== ifMatchRowVersion) {
+    throw new AppError('STALE_ROW_VERSION', 'Encounter was modified; refetch and retry', [
+      { field: 'If-Match', issue: 'stale row version', expected: String(cur.rowVersion) },
+    ]);
+  }
+  // ATOMIC OCC (fixes check-then-act lost update): the UPDATE itself is guarded by
+  // `rowVersion = <If-Match> AND status = 'DRAFT'`. If a concurrent writer bumps the
+  // version or signs between the read above and this write, updateMany matches 0
+  // rows and we surface STALE_ROW_VERSION instead of silently overwriting.
+  const patched = await db.encounter.updateMany({
+    where: { id, rowVersion: ifMatchRowVersion, status: 'DRAFT' },
+    data: {
+      ...(input.visitDate !== undefined ? { visitDate: new Date(input.visitDate) } : {}),
+      ...(input.encounterType !== undefined ? { encounterType: input.encounterType } : {}),
+      ...(input.soap?.S !== undefined ? { soapSubjective: input.soap.S } : {}),
+      ...(input.soap?.O !== undefined ? { soapObjective: input.soap.O } : {}),
+      ...(input.soap?.A !== undefined ? { soapAssessment: input.soap.A } : {}),
+      ...(input.soap?.P !== undefined ? { soapPlan: input.soap.P } : {}),
+      ...(input.mse?.appearance !== undefined ? { mseAppearance: input.mse.appearance } : {}),
+      ...(input.mse?.behavior !== undefined ? { mseBehavior: input.mse.behavior } : {}),
+      ...(input.mse?.speechCoherence !== undefined ? { mseSpeechCoherence: input.mse.speechCoherence } : {}),
+      ...(input.mse?.moodAffect !== undefined ? { mseMoodAffect: input.mse.moodAffect } : {}),
+      ...(input.diagnoses !== undefined ? { diagnoses: input.diagnoses } : {}),
+      rowVersion: { increment: 1 },
+    },
+  });
+  if (patched.count === 0) {
+    throw new AppError('STALE_ROW_VERSION', 'Encounter was modified concurrently; refetch and retry', [
+      { field: 'If-Match', issue: 'concurrent modification', expected: String(ifMatchRowVersion) },
+    ]);
+  }
+  const updated = await db.encounter.findUniqueOrThrow({
+    where: { id },
+    select: { id: true, status: true, rowVersion: true },
+  });
+  await writeAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'ENCOUNTER_UPDATE',
+    entityType: 'Encounter',
+    entityId: id,
+    requestId: randomUUID(),
+    beforeState: { rowVersion: ifMatchRowVersion },
+    afterState: { rowVersion: updated.rowVersion, status: updated.status },
+  });
+  return { encounterId: updated.id, status: updated.status, rowVersion: updated.rowVersion };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/ehr/encounters/:id/sign [DOCTOR] — complete SOAP -> SIGNED.
+// ---------------------------------------------------------------------------
+export async function signEncounter(
+  id: string,
+  input: SignEncounterInput,
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{ encounterId: string; status: 'SIGNED'; rowVersion: number; signedAt: string; finalContentHash: string }> {
+  const cur = await db.encounter.findUnique({ where: { id } });
+  if (cur === null) throw new AppError('NOT_FOUND', 'Encounter not found');
+  if (cur.status === 'SIGNED') {
+    throw new AppError('ALREADY_SIGNED', 'Encounter is already signed');
+  }
+  if (cur.rowVersion !== input.rowVersion) {
+    throw new AppError('STALE_ROW_VERSION', 'Encounter was modified; refetch and retry', [
+      { field: 'rowVersion', issue: 'stale row version', expected: String(cur.rowVersion) },
+    ]);
+  }
+  const soap = toSoapDto(cur);
+  if (!isCompleteSoap(soap)) {
+    throw new AppError('UNPROCESSABLE', 'Complete SOAP (S/O/A/P) is required to sign', [
+      { field: 'soap', issue: 'incomplete SOAP sections', expected: 'non-empty S, O, A, P' },
+    ]);
+  }
+  const mseComplete =
+    cur.mseAppearance.trim().length > 0 &&
+    cur.mseBehavior.trim().length > 0 &&
+    cur.mseSpeechCoherence.trim().length > 0 &&
+    cur.mseMoodAffect.trim().length > 0;
+  if (!mseComplete) {
+    throw new AppError('UNPROCESSABLE', 'Complete MSE is required to sign', [
+      { field: 'mse', issue: 'incomplete MSE selectors', expected: 'explicit values incl. NOT_PERFORMED' },
+    ]);
+  }
+  const diagnoses = Array.isArray(cur.diagnoses) ? (cur.diagnoses as string[]) : [];
+  const hash = computeFinalHash({
+    encounterId: cur.id,
+    patientId: cur.patientId,
+    soap: { S: soap.S as string, O: soap.O as string, A: soap.A as string, P: soap.P as string },
+    mse: {
+      appearance: cur.mseAppearance,
+      behavior: cur.mseBehavior,
+      speechCoherence: cur.mseSpeechCoherence,
+      moodAffect: cur.mseMoodAffect,
+    },
+    diagnoses,
+  });
+  const signedAt = new Date();
+  // ATOMIC OCC (fixes check-then-act double-sign): the sign UPDATE is guarded by
+  // `rowVersion = <body rowVersion> AND status = 'DRAFT'`. A concurrent sign/patch
+  // that changes the version or flips status to SIGNED makes this match 0 rows,
+  // so we surface STALE_ROW_VERSION instead of creating a second signature.
+  const signed = await db.encounter.updateMany({
+    where: { id, rowVersion: input.rowVersion, status: 'DRAFT' },
+    data: {
+      status: 'SIGNED',
+      signedAt,
+      signedByUserId: actor.userId,
+      finalContentHash: hash,
+      rowVersion: { increment: 1 },
+    },
+  });
+  if (signed.count === 0) {
+    throw new AppError('STALE_ROW_VERSION', 'Encounter was modified concurrently; refetch and retry', [
+      { field: 'rowVersion', issue: 'concurrent modification', expected: String(input.rowVersion) },
+    ]);
+  }
+  const updated = await db.encounter.findUniqueOrThrow({
+    where: { id },
+    select: { id: true, status: true, rowVersion: true },
+  });
+  await writeAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'ENCOUNTER_SIGN',
+    entityType: 'Encounter',
+    entityId: id,
+    requestId: randomUUID(),
+    beforeState: { status: 'DRAFT', rowVersion: input.rowVersion },
+    afterState: { status: 'SIGNED', rowVersion: updated.rowVersion },
+  });
+  return {
+    encounterId: updated.id,
+    status: 'SIGNED',
+    rowVersion: updated.rowVersion,
+    signedAt: signedAt.toISOString(),
+    finalContentHash: hash,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/ehr/encounters/:id/discard [DOCTOR] — DRAFT-only removal.
+// ---------------------------------------------------------------------------
+export async function discardEncounter(
+  id: string,
+  _actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{ encounterId: string; discarded: true }> {
+  const cur = await db.encounter.findUnique({ where: { id }, select: { id: true, status: true } });
+  if (cur === null) throw new AppError('NOT_FOUND', 'Encounter not found');
+  if (cur.status === 'SIGNED') {
+    throw new AppError('ALREADY_SIGNED', 'Signed encounters cannot be discarded; use addenda');
+  }
+  if (cur.status === 'DISCARDED') {
+    throw new AppError('CONFLICT', 'Encounter is already discarded');
+  }
+  await writeAudit(db, {
+    actorUserId: _actor.userId,
+    actorRole: _actor.role,
+    action: 'ENCOUNTER_DISCARD',
+    entityType: 'Encounter',
+    entityId: id,
+    requestId: randomUUID(),
+    beforeState: { status: cur.status },
+    afterState: { discarded: true },
+  });
+  // §1.5 zero-hard-delete: tombstone the DRAFT as DISCARDED rather than deleting
+  // the row, so the audit trail above never references a vanished entity and the
+  // (patientId, version) addendum space stays intact. DISCARDED is excluded from
+  // the SIGNED chart timeline, supervision unsigned-notes, and undo-complete's
+  // signed-encounter check (all of which filter status: 'SIGNED').
+  await db.encounter.update({
+    where: { id },
+    data: { status: 'DISCARDED' },
+  });
+  return { encounterId: id, discarded: true };
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/ehr/encounters/:id/addenda [DOCTOR] — SIGNED-only append-only.
+// ---------------------------------------------------------------------------
+export async function addEncounterAddendum(
+  id: string,
+  input: AddendumInput,
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{ encounterId: string; addendumId: string; version: number; createdAt: string }> {
+  const cur = await db.encounter.findUnique({ where: { id }, select: { id: true, status: true, addendumCount: true } });
+  if (cur === null) throw new AppError('NOT_FOUND', 'Encounter not found');
+  if (cur.status !== 'SIGNED') {
+    throw new AppError('CONFLICT', 'Addenda are only permitted on SIGNED encounters');
+  }
+  const version = cur.addendumCount + 1;
+  const created = await db.$transaction(async (tx) => {
+    const add = await tx.encounterAddendum.create({
+      data: {
+        encounterId: id,
+        version,
+        text: input.text,
+        reasonCode: input.reasonCode,
+        createdByUserId: actor.userId,
+      },
+    });
+    await tx.encounter.update({ where: { id }, data: { addendumCount: { increment: 1 } } });
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'ENCOUNTER_ADDENDUM',
+      entityType: 'Encounter',
+      entityId: id,
+      requestId: randomUUID(),
+      afterState: { version, reasonCode: input.reasonCode },
+    });
+    return add;
+  });
+  return { encounterId: id, addendumId: created.id, version, createdAt: created.createdAt.toISOString() };
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/ehr/patients/:id/chart?limit&cursor [DOCTOR] — SIGNED timeline.
+// ---------------------------------------------------------------------------
+export async function getChart(
+  patientId: string,
+  query: ChartQuery,
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{
+  patientId: string;
+  encounters: Array<{
+    encounterId: string;
+    source: string;
+    visitDate: string | null;
+    encounterType: string | null;
+    signedAt: string | null;
+    diagnoses: string[];
+    soap: { S: string | null; O: string | null; A: string | null; P: string | null };
+    mse: { appearance: string; behavior: string; speechCoherence: string; moodAffect: string };
+    finalContentHash: string | null;
+    addenda: Array<{ id: string; version: number; text: string; reasonCode: string; createdAt: string }>;
+  }>;
+  nextCursor: string | null;
+}> {
+  await assertPatientExists(db, patientId);
+  const limit = query.limit ?? 20;
+  const rows = await db.encounter.findMany({
+    where: { patientId, status: 'SIGNED' },
+    orderBy: [{ signedAt: 'desc' }, { createdAt: 'desc' }],
+    ...(query.cursor !== undefined ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    take: limit + 1,
+    include: { addenda: { orderBy: { version: 'asc' } } },
+  });
+  const page = rows.slice(0, limit);
+  const nextCursor = rows.length > limit ? page[page.length - 1]?.id ?? null : null;
+  await writeAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'CHART_READ',
+    entityType: 'Patient',
+    entityId: patientId,
+    requestId: randomUUID(),
+    afterState: { count: page.length },
+  });
+  return {
+    patientId,
+    encounters: page.map((r) => ({
+      encounterId: r.id,
+      source: r.source,
+      visitDate: r.visitDate?.toISOString() ?? null,
+      encounterType: r.encounterType,
+      signedAt: r.signedAt?.toISOString() ?? null,
+      diagnoses: Array.isArray(r.diagnoses) ? (r.diagnoses as string[]) : [],
+      soap: toSoapDto(r),
+      mse: {
+        appearance: r.mseAppearance,
+        behavior: r.mseBehavior,
+        speechCoherence: r.mseSpeechCoherence,
+        moodAffect: r.mseMoodAffect,
+      },
+      finalContentHash: r.finalContentHash,
+      addenda: r.addenda.map((a) => ({
+        id: a.id,
+        version: a.version,
+        text: a.text,
+        reasonCode: a.reasonCode,
+        createdAt: a.createdAt.toISOString(),
+      })),
+    })),
+    nextCursor,
+  };
+}

@@ -1,0 +1,420 @@
+/**
+ * Supervision reports screen (doctor only) — new screen in the established
+ * design language. Aggregates the backend supervision endpoints: cash
+ * summary (design donut), shift history with variance, exceptions,
+ * discounts, and the audit trail. Includes a Recharts revenue chart styled
+ * with the design palette.
+ */
+
+import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
+import { supervisionApi, auditApi } from "@/api/admin"
+import { shiftsApi } from "@/api/shifts"
+import { apiErrorMessage } from "@/api/client"
+import { Icon, SkeletonBlock, StatCard, useToast } from "@/components/ui"
+import { arDate, arNum, arDateTime, moneyMinor, arPercent } from "@/lib/format"
+import { shiftResultLabel } from "@/lib/constants"
+
+const primary = "#5145cd"
+const teal = "#0d9488"
+const blue = "#56a8e8"
+
+export default function ReportsScreen() {
+  const { notify } = useToast()
+  const [tab, setTab] = useState<"cash" | "shifts" | "exceptions" | "audit">("cash")
+
+  const shiftQuery = useQuery({
+    queryKey: ["shifts", "current"],
+    queryFn: () => shiftsApi.current(),
+  })
+  const shiftsHistoryQuery = useQuery({
+    queryKey: ["supervision", "shifts"],
+    queryFn: () => supervisionApi.shifts({ limit: 30 }),
+  })
+  const exceptionsQuery = useQuery({
+    queryKey: ["supervision", "exceptions"],
+    queryFn: () => supervisionApi.exceptions(),
+  })
+  const unsignedQuery = useQuery({
+    queryKey: ["supervision", "unsigned-notes"],
+    queryFn: () => supervisionApi.unsignedNotes(),
+  })
+  const auditQuery = useQuery({
+    queryKey: ["audit", "recent"],
+    queryFn: () => auditApi.list({ limit: 100 }),
+  })
+
+  // Cash summary for the most recent CLOSED shift.
+  const closedShifts = (shiftsHistoryQuery.data?.data ?? []).filter(
+    (s) => s.status === "CLOSED",
+  )
+  const latestClosed = closedShifts[0]
+  const cashSummaryQuery = useQuery({
+    queryKey: ["supervision", "cash-summary", latestClosed?.shiftId ?? "none"],
+    queryFn: () => supervisionApi.cashSummary(latestClosed!.shiftId),
+    enabled: Boolean(latestClosed),
+  })
+  const discountsQuery = useQuery({
+    queryKey: ["supervision", "discounts", latestClosed?.shiftId ?? "none"],
+    queryFn: () => supervisionApi.discounts(latestClosed!.shiftId!),
+    enabled: Boolean(latestClosed),
+  })
+
+  const cash = cashSummaryQuery.data
+  const gross = cash ? cash.byMethod.CASH + cash.byMethod.OTHER : 0
+  const cashPart = cash?.byMethod.CASH ?? 0
+  const otherPart = cash?.byMethod.OTHER ?? 0
+  const cashPct = gross > 0 ? (cashPart / gross) * 100 : 0
+
+  const chartData = [...closedShifts]
+    .reverse()
+    .slice(-10)
+    .map((s) => ({
+      date: arDate(s.businessDate),
+      expected: (s.expectedCashMinor ?? 0) / 100,
+      actual: (s.actualCountedMinor ?? 0) / 100,
+    }))
+
+  const exceptions = exceptionsQuery.data
+  const unacked = exceptions?.unacknowledgedEmergencies ?? []
+  const unsignedNotes = unsignedQuery.data
+
+  const auditRows = auditQuery.data?.data ?? []
+
+  return (
+    <>
+      <section className="closing-top">
+        <div>
+          <span className="section-kicker">المساحة الإشرافية</span>
+          <h2>تقارير الخزينة والتشغيل</h2>
+          <p>ملخصات مالية رسمية للورديبات المقفلة وتنبيهات التشغيل.</p>
+        </div>
+        <div className="closing-status">
+          <span className="live-dot" />
+          <span>
+            <small>حالة الوردية الحالية</small>
+            <strong>
+              {shiftQuery.data?.status === "OPEN" ? "مفتوحة" : "لا وردية مفتوحة"}
+            </strong>
+          </span>
+        </div>
+      </section>
+
+      <div className="tabs" style={{ marginBottom: "14px" }}>
+        <button className={tab === "cash" ? "active" : ""} onClick={() => setTab("cash")}>
+          ملخص الخزينة
+        </button>
+        <button className={tab === "shifts" ? "active" : ""} onClick={() => setTab("shifts")}>
+          سجل الورديبات
+        </button>
+        <button className={tab === "exceptions" ? "active" : ""} onClick={() => setTab("exceptions")}>
+          الاستثناءات
+        </button>
+        <button className={tab === "audit" ? "active" : ""} onClick={() => setTab("audit")}>
+          سجل التدقيق
+        </button>
+      </div>
+
+      {tab === "cash" && (
+        <>
+          {!latestClosed && (
+            <section className="card">
+              <div className="empty-state">
+                <Icon name="chart" size={34} />
+                <h3>لا وردية مقفلة بعد</h3>
+                <p>ستظهر الملخصات الرسمية بعد أول إغلاق يومي.</p>
+              </div>
+            </section>
+          )}
+          {latestClosed && (
+            <>
+              <section className="stats-grid four">
+                <StatCard
+                  label="إجمالي محصل"
+                  value={arNum(gross / 100)}
+                  suffix="ج.م."
+                  hint={`وردية ${arDate(latestClosed.businessDate)}`}
+                  icon="wallet"
+                  tone="mint"
+                />
+                <StatCard
+                  label="نقدي"
+                  value={arNum(cashPart / 100)}
+                  suffix="ج.م."
+                  hint={arPercent(cashPart, gross || 1)}
+                  icon="chart"
+                  tone="violet"
+                />
+                <StatCard
+                  label="مصروفات نثرية"
+                  value={arNum((cash?.pettyExpenseMinor ?? 0) / 100)}
+                  suffix="ج.م."
+                  hint={`إيداعات: ${arNum((cash?.pettyInjectionMinor ?? 0) / 100)} ج.م.`}
+                  icon="receipt"
+                  tone="amber"
+                />
+                <StatCard
+                  label="نتيجة المطابقة"
+                  value={
+                    cash?.result ? shiftResultLabel[cash.result] ?? cash.result : "—"
+                  }
+                  hint={
+                    cash?.differenceMinor !== null && cash?.differenceMinor !== undefined
+                      ? `فرق ${moneyMinor(Math.abs(cash.differenceMinor))}`
+                      : "—"
+                  }
+                  icon="check"
+                  tone={cash?.reconciliationPassed ? "blue" : "coral"}
+                />
+              </section>
+
+              <section className="card report-chart">
+                <div className="card-header">
+                  <div>
+                    <h3>توزيع الإيراد حسب طريقة الدفع</h3>
+                    <p>آخر وردية مقفلة — {arDate(latestClosed.businessDate)}</p>
+                  </div>
+                </div>
+                <div className="chart-body">
+                  <div
+                    className="donut"
+                    style={{
+                      background: `conic-gradient(${primary} 0 ${cashPct}%, ${teal} ${cashPct}% 100%)`,
+                    }}
+                  >
+                    <div>
+                      <strong>{arNum(gross / 100)}</strong>
+                      <small>ج.م.</small>
+                    </div>
+                  </div>
+                  <div className="chart-legend">
+                    <span>
+                      <i className="legend-indigo" />
+                      <b>نقدي</b>
+                      <small>{moneyMinor(cashPart)}</small>
+                      <em>{arPercent(cashPart, gross || 1)}</em>
+                    </span>
+                    <span>
+                      <i className="legend-teal" />
+                      <b>أخرى (إلكتروني)</b>
+                      <small>{moneyMinor(otherPart)}</small>
+                      <em>{arPercent(otherPart, gross || 1)}</em>
+                    </span>
+                    <span>
+                      <i className="legend-blue" />
+                      <b>عكس عمليات</b>
+                      <small>{moneyMinor(cash?.reversalsMinor ?? 0)}</small>
+                      <em>—</em>
+                    </span>
+                  </div>
+                </div>
+              </section>
+
+              {(discountsQuery.data?.count ?? 0) > 0 && (
+                <section className="card archive-card">
+                  <div className="card-header">
+                    <div>
+                      <span className="section-kicker">رقابة الخصومات</span>
+                      <h3>
+                        خصومات الوردية ({arNum(discountsQuery.data?.count ?? 0)})
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="data-table">
+                    <div className="data-head">
+                      <span>الفاتورة</span>
+                      <span>الأساسي</span>
+                      <span>النهائي</span>
+                      <span>الخصم</span>
+                      <span>السبب</span>
+                      <span>بواسطة</span>
+                    </div>
+                    {(discountsQuery.data?.data ?? []).map((d) => (
+                      <div className="data-row" key={d.invoiceId} style={{ cursor: "default" }}>
+                        <strong>{d.invoiceId.slice(-8).toUpperCase()}</strong>
+                        <span>{moneyMinor(d.standardFeeMinor)}</span>
+                        <span>{moneyMinor(d.finalFeeMinor)}</span>
+                        <span className="due-text">{moneyMinor(d.discountMinor)}</span>
+                        <span>{d.discountReason ?? (d.isComplimentary ? "استشارة مجانية" : "—")}</span>
+                        <span>
+                          {d.authorName} ({d.authorRole === "DOCTOR" ? "طبيب" : "استقبال"})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {tab === "shifts" && (
+        <section className="card archive-card">
+          <div className="card-header">
+            <div>
+              <span className="section-kicker">سجل الورديبات</span>
+              <h3>آخر {arNum(closedShifts.length)} وردية مقفلة</h3>
+            </div>
+          </div>
+          {chartData.length >= 2 && (
+            <div style={{ height: "220px", direction: "ltr", marginBottom: "18px" }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                  <CartesianGrid stroke="#e7e9f2" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#72758a" }} />
+                  <YAxis tick={{ fontSize: 10, fill: "#72758a" }} width={44} />
+                  <Tooltip
+                    contentStyle={{
+                      fontFamily: "Cairo, sans-serif",
+                      fontSize: 12,
+                      direction: "rtl",
+                      borderRadius: 10,
+                      border: "1px solid #e7e9f2",
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="expected"
+                    name="المتوقع"
+                    stroke={primary}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="actual"
+                    name="الفعلي"
+                    stroke={teal}
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="data-table">
+            <div className="data-head">
+              <span>التاريخ</span>
+              <span>المتوقع</span>
+              <span>الفعلي</span>
+              <span>الفرق</span>
+              <span>النتيجة</span>
+              <span>المراجعة</span>
+            </div>
+            {shiftsHistoryQuery.isLoading && <SkeletonBlock lines={3} />}
+            {closedShifts.length === 0 && !shiftsHistoryQuery.isLoading && (
+              <div className="data-row">
+                <span>لا ورديات مقفلة بعد.</span>
+              </div>
+            )}
+            {closedShifts.map((s) => (
+              <div className="data-row" key={s.shiftId} style={{ cursor: "default" }}>
+                <strong>{arDate(s.businessDate)}</strong>
+                <span>{moneyMinor(s.expectedCashMinor ?? 0)}</span>
+                <span>{moneyMinor(s.actualCountedMinor ?? 0)}</span>
+                <span className={(s.differenceMinor ?? 0) !== 0 ? "due-text" : ""}>
+                  {moneyMinor(Math.abs(s.differenceMinor ?? 0))}
+                </span>
+                <span className="method-pill">
+                  {s.result ? shiftResultLabel[s.result] ?? s.result : "—"}
+                </span>
+                <span>{s.reviewedAt ? arDate(s.reviewedAt) : "بانتظار المراجعة"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tab === "exceptions" && (
+        <section className="card archive-card">
+          <div className="card-header">
+            <div>
+              <span className="section-kicker">تنبيهات التشغيل</span>
+              <h3>استثناءات الوردية</h3>
+            </div>
+          </div>
+          <div className="data-table">
+            <div className="data-head">
+              <span>النوع</span>
+              <span>التفاصيل</span>
+              <span>الوقت</span>
+            </div>
+            {unacked.length === 0 && (
+              <div className="data-row">
+                <span>لا استثناءات غير معتمدة.</span>
+              </div>
+            )}
+            {unacked.map((e) => (
+              <div className="data-row" key={e.queueEntryId} style={{ cursor: "default" }}>
+                <strong>طارئ غير مُعتمد</strong>
+                <span>
+                  مريض {e.patientId.slice(-6)} · {e.reasonCode}
+                </span>
+                <span>{arDateTime(e.flaggedAt)}</span>
+              </div>
+            ))}
+            {(unsignedNotes?.completedWithoutSigned ?? [])
+              .filter((c) => !c.hasSignedEncounter)
+              .map((c) => (
+                <div className="data-row" key={c.queueEntryId} style={{ cursor: "default" }}>
+                  <strong>زيارة بدون توثيق</strong>
+                  <span>{c.displayName}</span>
+                  <span>{arDateTime(c.completedAt)}</span>
+                </div>
+              ))}
+            {(unsignedNotes?.staleDrafts ?? []).map((d) => (
+              <div className="data-row" key={d.draftId} style={{ cursor: "default" }}>
+                <strong>{d.draftKind === "SCRIBE" ? "جلسة AI معلقة" : "مسودة تقرير قديمة"}</strong>
+                <span>
+                  مريض {d.patientId.slice(-6)} · عمرها {arNum(Math.round(d.ageHours))} ساعة
+                </span>
+                <span>{arDateTime(d.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tab === "audit" && (
+        <section className="card archive-card">
+          <div className="card-header">
+            <div>
+              <span className="section-kicker">سجل التدقيق</span>
+              <h3>آخر {arNum(auditRows.length)} حدثًا</h3>
+              <p>يُعرض للطبيب السجل الكامل، ولاستقبال أحداثه التشغيلية فقط.</p>
+            </div>
+          </div>
+          <div className="data-table">
+            <div className="data-head">
+              <span>الحدث</span>
+              <span>الكيان</span>
+              <span>الوقت</span>
+              <span>ملاحظة</span>
+            </div>
+            {auditQuery.isLoading && <SkeletonBlock lines={4} />}
+            {auditRows.map((a) => (
+              <div className="data-row" key={a.id} style={{ cursor: "default" }}>
+                <strong>{a.action}</strong>
+                <span>
+                  {a.entityType} · {a.entityId.slice(-6)}
+                </span>
+                <span>{arDateTime(a.createdAt)}</span>
+                <span>{a.reasonText ?? "—"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  )
+}
