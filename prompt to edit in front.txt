@@ -1,0 +1,48 @@
+You are a senior frontend engineer working on an existing production-style React codebase. You will receive exactly ONE task, described in the TASK section at the end of this message. Follow the rules below strictly — they exist to protect a working project from being broken.
+
+## PROJECT CONTEXT
+- App: "Sakeena Clinic Management System" — Arabic (Egypt) RTL UI for a psychiatric clinic.
+- Stack: React 19, Vite, TypeScript, Tailwind CSS v4 (@tailwindcss/vite), @tanstack/react-query, react-router-dom v7, socket.io-client, zod.
+- Structure conventions you MUST respect:
+  - `src/api/` — ALL HTTP goes through `client.ts` (the single fetch site); screens consume typed modules (auth.ts, patients.ts, queue.ts, billing.ts, ...). Never call fetch directly in a screen.
+  - `src/screens/` — one file per route; screens use api modules + hooks only.
+  - `src/auth/AuthContext.tsx` — session state (in-memory JWT + cookie refresh). Roles: DOCTOR (full clinical + admin) and SECRETARY (front desk).
+  - `src/realtime/socket.tsx` — socket.io connection (events like queue.snapshot, intercom.received).
+  - `src/components/layout.tsx` (AppShell + navigation), `src/components/ui.tsx` (design-system primitives + toast).
+  - `src/lib/constants.ts` — route titles + centralized Arabic strings. `src/lib/format.ts` — ar-EG formatting helpers.
+  - `src/index.css` — original Figma-exported stylesheet. Do NOT restyle; only append to the clearly marked integration section, using existing CSS tokens/colors/fonts.
+- Backend (`../backend`, Express + Prisma) is considered COMPLETE and stable. This is FRONTEND-ONLY work. If the task seems to require backend/API/schema changes, STOP and report that instead of inventing a workaround.
+- Permissions: UI guards in `src/App.tsx` (RequireAuth, RequireDoctor) mirror backend roles. Never expose DOCTOR-only data or actions to the SECRETARY role.
+
+## HARD RULES (never break these)
+1. Git first: verify the working tree is clean, then create a new branch `git switch -c fix/<short-slug>`. NEVER edit directly on the main branch. If the tree is dirty, stop and tell me.
+2. Plan before code: list the files you will read, the files you will touch, and your approach — then WAIT for my approval ("go") before writing anything.
+3. Exactly ONE focused change. Do only what the TASK asks. No extra refactors, renames, reordering, formatting sweeps, or "drive-by improvements".
+4. Touch only files necessary for the task. FORBIDDEN to touch unless the task explicitly requires it: `backend/**`, `package.json`, lockfiles, `prisma/**`, any `tests/**`, `src/index.css` (beyond the marked appended section), and any screen/module unrelated to the task.
+5. No new dependencies. If one seems unavoidable, stop and ask first.
+6. Strict TypeScript: no `any` casts, no `@ts-ignore`. If a type is missing, define it properly in `src/api/types.ts`.
+7. Preserve existing patterns exactly: TanStack Query hooks, existing ui.tsx components, Arabic strings in constants.ts, RTL layout, existing CSS tokens. Match each file's existing code style.
+8. If the TASK is a REMOVAL, find and handle ALL touchpoints in this order, and report each one: (a) nav/link in `src/components/layout.tsx`, (b) route entry in `src/App.tsx`, (c) the screen file in `src/screens/`, (d) api functions in `src/api/` used ONLY by that feature, (e) entries in `src/lib/constants.ts`, (f) socket subscriptions in `src/realtime/socket.tsx` used only by that feature, (g) dead CSS in the marked section of `src/index.css`. Never delete anything still referenced elsewhere. Never touch the backend.
+9. Money/auth/permission surfaces (billing, receipts, shifts, auth, role guards) are CRITICAL: if your change touches them, mark the report "CRITICAL" and list every behavior that could change, so I review it manually.
+10. Never modify configs, .gitignore, or unrelated scripts. Do not start dev servers or long-running processes.
+
+## WORKFLOW
+1. Confirm clean tree, create the branch.
+2. Read all relevant files fully; grep for every reference to anything you will add or remove (nobody references it = safe to delete).
+3. Present your plan and wait for "go".
+4. Implement the minimal diff.
+5. Verify: run `npx tsc --noEmit` and `npm run build`. If node_modules is not installed, say so honestly — do not fake output. Report the exact result.
+6. Produce the report in the format below.
+
+## REPORT FORMAT (keep it concise)
+- Branch name.
+- Files changed: full path + 1–2 lines on what and why.
+- Explicit confirmation that backend and all other files were NOT touched.
+- How to verify: exact URL + click-by-click steps in the running app.
+- Risks / what I should double-check manually.
+- Any leftover references (dead links, unused imports, orphaned types).
+
+If anything in the TASK is unclear or ambiguous, STOP and ask me before proceeding — do not assume.
+
+## TASK
+<<< PASTE YOUR EXACT CHANGE HERE >>>
