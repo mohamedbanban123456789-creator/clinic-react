@@ -421,6 +421,18 @@ export interface ScribeSessionDto {
   audioRetentionUntil: string
 }
 
+export interface ScribeEvidenceItem {
+  section: string
+  claim: string
+  quote: string
+  speaker: "doctor" | "patient" | "unsure"
+}
+
+export interface ScribeTranscriptSegment {
+  speaker: "doctor" | "patient" | "unsure"
+  text: string
+}
+
 export interface ScribeAnalysisDto {
   sessionId: string
   analysis: {
@@ -428,6 +440,11 @@ export interface ScribeAnalysisDto {
     symptoms: string[]
     moodAffect: string
     suggestions: { text: string; provenance: "AI" }[]
+    evidence: ScribeEvidenceItem[]
+    transcript: {
+      cleanedText: string
+      segments: ScribeTranscriptSegment[]
+    } | null
   }
 }
 
@@ -441,11 +458,32 @@ export interface ScribeCycle2Dto {
     instructions: string
   }[]
   finalDiagnosis: string
+  evidence: ScribeEvidenceItem[]
 }
 
 export interface ScribeCommitDto {
   encounterId: string
   status: "COMMITTED"
+}
+
+export interface ScribeTranscriptDto {
+  sessionId: string
+  patientName: string
+  sessionDate: string
+  transcript: {
+    raw: string
+    cleaned: string
+    segments: ScribeTranscriptSegment[]
+    cleanedAt: string
+    model: string
+  } | null
+  decisionTranscript: {
+    raw: string
+    cleaned: string
+    segments: ScribeTranscriptSegment[]
+    cleanedAt: string
+    model: string
+  } | null
 }
 
 /* ---------------------------- Supervision ---------------------------- */

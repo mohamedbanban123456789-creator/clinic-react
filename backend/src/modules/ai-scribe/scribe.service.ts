@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient, ScribeSessionStatus } from '@prisma/client';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { prisma } from '../../common/prisma.js';
 import { AppError } from '../../common/errors/AppError.js';
 import { isUniqueViolation } from '../../common/db/unique-violation.js';
@@ -8,11 +9,23 @@ import { sha256Hex } from '../../common/crypto/vault.js';
 import { loadEnv } from '../../config/env.js';
 import {
   analyzeConsultationAudio,
+  cycle1AnalysisSchema,
+  cycle2SynthesisSchema,
+  parseJsonOrThrow,
   synthesizeDoctorDecision,
   type Cycle1Analysis,
   type Cycle2Synthesis,
   type GenerateContentFn,
 } from './gemini.provider.js';
+import {
+  analyzeCleanedTranscript,
+  cleanupTranscript,
+  isGroqSelected,
+  resolveGroqConfig,
+  transcribeAudio,
+  type TranscriptSegment,
+} from './groq.provider.js';
+import { CYCLE_1_ANALYSIS_PROMPT, CYCLE_2_SYNTHESIS_PROMPT } from './prompts/scribe.prompts.js';
 import { purgeScribeAudio, saveScribeAudio } from './audio.store.js';
 import type {
   AudioUploadInput,
@@ -38,6 +51,21 @@ export type { ScribeSessionStatus };
 interface StoredAnalysis {
   readonly cycle1: Cycle1Analysis | null;
   readonly cycle2: Cycle2Synthesis | null;
+  /** Cleaned session transcript (Groq 3-stage path; null on the legacy path). */
+  readonly transcript: StoredTranscript | null;
+  /** Cleaned Cycle-2 decision audio transcript, when a second audio ran. */
+  readonly decisionTranscript: StoredTranscript | null;
+}
+
+/** Cleaned transcript as persisted (retrievable by patient + session date). */
+export interface StoredTranscript {
+  readonly raw: string;
+  readonly cleaned: string;
+  readonly segments: TranscriptSegment[];
+  readonly cleanedAt: string;
+  readonly model: string;
+  /** sha256 of the source audio base64 — same bytes reuse the transcript. */
+  readonly audioHash: string;
 }
 
 /** Retention window for scribe audio (days), from env (default 30). */
@@ -77,25 +105,54 @@ async function loadStoredAnalysis(
   db: PrismaClient,
   sessionId: string,
 ): Promise<StoredAnalysis> {
+  const empty: StoredAnalysis = { cycle1: null, cycle2: null, transcript: null, decisionTranscript: null };
   const draft = await db.scribeDraft.findFirst({
     where: { scribeSessionId: sessionId },
     orderBy: { version: 'desc' },
   });
-  if (draft === null) return { cycle1: null, cycle2: null };
+  if (draft === null) return empty;
   const snapshot = draft.mseSnapshot as unknown;
   if (typeof snapshot === 'object' && snapshot !== null && 'analysis' in snapshot) {
     const analysis = (snapshot as { analysis: unknown }).analysis;
     if (typeof analysis === 'object' && analysis !== null) {
-      return analysis as StoredAnalysis;
+      const a = analysis as Partial<StoredAnalysis>;
+      return {
+        cycle1: (a.cycle1 ?? null) as StoredAnalysis['cycle1'],
+        cycle2: (a.cycle2 ?? null) as StoredAnalysis['cycle2'],
+        transcript: (a.transcript ?? null) as StoredAnalysis['transcript'],
+        decisionTranscript: (a.decisionTranscript ?? null) as StoredAnalysis['decisionTranscript'],
+      };
     }
   }
-  return { cycle1: null, cycle2: null };
+  return empty;
 }
 
 export interface ScribeTestDeps {
   readonly generateContent?: GenerateContentFn;
   readonly saveAudio?: typeof saveScribeAudio;
   readonly purgeAudioFiles?: typeof purgeScribeAudio;
+  /**
+   * Groq 3-stage seam (tests only): stage mocks with call counting.
+   * Production omits it and the real Whisper/cleanup/chat stages run.
+   */
+  readonly groqStages?: {
+    readonly transcribe: (input: { audioBase64: string; mimeType?: string }) => Promise<string>;
+    readonly cleanup: (
+      raw: string,
+      ctx: { patientName: string; sessionDate: string },
+    ) => Promise<{ segments: TranscriptSegment[]; cleanedText: string }>;
+    readonly analyze: (input: { systemPrompt: string; cleanedText: string; contextText?: string }) => Promise<string>;
+  };
+}
+
+/**
+ * Groq 3-stage path selector: explicit test mocks always win (legacy audio
+ * seam); otherwise SCRIBE_PROVIDER picks Groq transcription+cleanup+analysis
+ * or the legacy direct-audio path (Gemini code kept, disabled by default).
+ */
+function useGroqPipeline(deps: ScribeTestDeps): boolean {
+  if (deps.generateContent !== undefined) return false;
+  return isGroqSelected();
 }
 
 /** Wire shape of a Cycle-1 suggestion (renderable, provenance-tagged). */
@@ -116,16 +173,69 @@ export interface Cycle1AnalysisResponse {
    */
   readonly moodAffect: string;
   readonly suggestions: readonly Cycle1SuggestionDto[];
+  /** Audio evidence grounding each statement (claim + verbatim quote). */
+  readonly evidence: readonly Cycle1EvidenceDto[];
+  /** Cleaned, speaker-segmented transcript (Groq path; null on legacy path). */
+  readonly transcript: {
+    readonly cleanedText: string;
+    readonly segments: readonly { speaker: 'doctor' | 'patient' | 'unsure'; text: string }[];
+  } | null;
+}
+
+/** Wire shape of one audio evidence item (verifiable before sign-off). */
+export interface Cycle1EvidenceDto {
+  readonly section: string;
+  readonly claim: string;
+  readonly quote: string;
+  readonly speaker: 'doctor' | 'patient' | 'unsure';
 }
 
 /** Map the provider analysis to the wire DTO: suggestions become tagged objects. */
-function toCycle1Response(analysis: Cycle1Analysis): Cycle1AnalysisResponse {
+function toCycle1Response(analysis: Cycle1Analysis, transcript: StoredTranscript | null): Cycle1AnalysisResponse {
   return {
     chiefComplaint: analysis.chiefComplaint,
     symptoms: analysis.symptoms,
     moodAffect: analysis.moodAndAffect,
     suggestions: analysis.suggestions.map((text) => ({ text, provenance: 'AI' as const })),
+    evidence: (analysis.evidence ?? []).map((e) => ({ section: e.section, claim: e.claim, quote: e.quote, speaker: e.speaker })),
+    transcript:
+      transcript === null
+        ? null
+        : {
+            cleanedText: transcript.cleaned,
+            segments: transcript.segments.map((s) => ({ speaker: s.speaker, text: s.text })),
+          },
   };
+}
+
+/** Session context for transcript cleanup (patient name fixes mishearings). */
+async function cleanupContext(
+  db: PrismaClient,
+  session: { patientId: string; createdAt: unknown },
+): Promise<{ patientName: string; sessionDate: string }> {
+  const patient = await db.patient.findUnique({ where: { id: session.patientId }, select: { fullName: true } });
+  // NOTE: the nullish fallback also covers test doubles that omit fullName.
+  const fullName = patient?.fullName as unknown;
+  return {
+    patientName: typeof fullName === 'string' && fullName.length > 0 ? fullName : 'غير معروف',
+    sessionDate: sessionDateOf(session),
+  };
+}
+
+/** Defensive session-date read (fake/test rows may omit createdAt). */
+function sessionDateOf(session: { createdAt: unknown }): string {
+  const at = session.createdAt;
+  if (at instanceof Date && !Number.isNaN(at.getTime())) return at.toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Parse provider JSON output with a cycle schema (422 on shape mismatch). */
+function parseCycleJson<T>(schema: ZodType<T, ZodTypeDef, unknown>, raw: string): T {
+  const parsed = schema.safeParse(parseJsonOrThrow(raw));
+  if (!parsed.success) {
+    throw AppError.fromZod(parsed.error.issues);
+  }
+  return parsed.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,17 +319,55 @@ export async function runCycle1Consultation(
     throw new AppError('CONFLICT', 'Committed sessions cannot be re-analyzed');
   }
 
-  const analysis = await analyzeConsultationAudio({
-    audioBase64: input.audioBase64,
-    ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-    ...(deps.generateContent !== undefined ? { generateContent: deps.generateContent } : {}),
-  });
+  const prior = await loadStoredAnalysis(db, sessionId);
+
+  let analysis: Cycle1Analysis;
+  let transcript: StoredTranscript | null = prior.transcript;
+  if (useGroqPipeline(deps)) {
+    // Groq 3-stage path: transcribe -> cleanup/diarize -> analyze cleaned.
+    const stages = deps.groqStages;
+    const audioInput = {
+      audioBase64: input.audioBase64,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+    };
+    const raw =
+      stages !== undefined
+        ? await stages.transcribe(audioInput)
+        : await transcribeAudio(audioInput);
+    const ctx = await cleanupContext(db, session);
+    const cleaned =
+      stages !== undefined
+        ? await stages.cleanup(raw, ctx)
+        : await cleanupTranscript(raw, ctx);
+    const rawJson =
+      stages !== undefined
+        ? await stages.analyze({ systemPrompt: CYCLE_1_ANALYSIS_PROMPT, cleanedText: cleaned.cleanedText })
+        : await analyzeCleanedTranscript({
+            systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
+            cleanedText: cleaned.cleanedText,
+          });
+    analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
+    transcript = {
+      raw,
+      cleaned: cleaned.cleanedText,
+      segments: cleaned.segments,
+      cleanedAt: new Date().toISOString(),
+      model: resolveGroqConfig().chatModel,
+      audioHash: sha256Hex(input.audioBase64),
+    };
+  } else {
+    const generate = deps.generateContent;
+    analysis = await analyzeConsultationAudio({
+      audioBase64: input.audioBase64,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      ...(generate !== undefined ? { generateContent: generate } : {}),
+    });
+  }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;
   const audioRef = await saveAudio(sessionId, 'cycle-1', input.audioBase64, input.mimeType ?? 'audio/webm');
 
-  const prior = await loadStoredAnalysis(db, sessionId);
-  const stored: StoredAnalysis = { cycle1: analysis, cycle2: prior.cycle2 };
+  const stored: StoredAnalysis = { cycle1: analysis, cycle2: prior.cycle2, transcript, decisionTranscript: prior.decisionTranscript };
 
   await db.$transaction(async (tx) => {
     await tx.scribeSession.update({
@@ -249,7 +397,7 @@ export async function runCycle1Consultation(
     });
   });
 
-  return { sessionId, analysis: toCycle1Response(analysis) };
+  return { sessionId, analysis: toCycle1Response(analysis, transcript) };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +414,7 @@ export async function runCycle2DoctorDecision(
   soap: Cycle2Synthesis['soap'];
   prescriptions: Cycle2Synthesis['prescriptions'];
   finalDiagnosis: string;
+  evidence: Cycle2Synthesis['evidence'];
 }> {
   const session = await requireSessionRow(db, sessionId);
   assertNotWithdrawnOrPurged(session.status);
@@ -279,17 +428,72 @@ export async function runCycle2DoctorDecision(
     ]);
   }
 
-  const synthesis = await synthesizeDoctorDecision({
-    audioBase64: input.audioBase64,
-    ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-    cycle1Context: prior.cycle1,
-    ...(deps.generateContent !== undefined ? { generateContent: deps.generateContent } : {}),
-  });
+  const generateDecision = deps.generateContent;
+  let synthesis: Cycle2Synthesis;
+  let decisionTranscript: StoredTranscript | null = prior.decisionTranscript;
+  if (generateDecision !== undefined) {
+    synthesis = await synthesizeDoctorDecision({
+      audioBase64: input.audioBase64,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      cycle1Context: prior.cycle1,
+      generateContent: generateDecision,
+    });
+  } else if (useGroqPipeline(deps)) {
+    // Groq 3-stage path. The UI sends ONE recording for both cycles: when
+    // the Cycle-2 bytes match Cycle-1 (audio hash), the cleaned transcript
+    // is reused with ZERO extra AI calls. A different audio (e.g. a fresh
+    // doctor dictation) runs the full transcribe+cleanup pipeline instead.
+    const stages = deps.groqStages;
+    const audioHash = sha256Hex(input.audioBase64);
+    let cleanedDecisionText: string;
+    if (prior.transcript !== null && prior.transcript.audioHash === audioHash) {
+      decisionTranscript = prior.transcript;
+      cleanedDecisionText = prior.transcript.cleaned;
+    } else {
+      const audioInput = {
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      };
+      const rawDecision =
+        stages !== undefined ? await stages.transcribe(audioInput) : await transcribeAudio(audioInput);
+      const ctx = await cleanupContext(db, session);
+      const cleanedDecision =
+        stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
+      decisionTranscript = {
+        raw: rawDecision,
+        cleaned: cleanedDecision.cleanedText,
+        segments: cleanedDecision.segments,
+        cleanedAt: new Date().toISOString(),
+        model: resolveGroqConfig().chatModel,
+        audioHash,
+      };
+      cleanedDecisionText = cleanedDecision.cleanedText;
+    }
+    const synthesisJson =
+      stages !== undefined
+        ? await stages.analyze({
+            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+            cleanedText: cleanedDecisionText,
+            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+          })
+        : await analyzeCleanedTranscript({
+            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+            cleanedText: cleanedDecisionText,
+            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+          });
+    synthesis = parseCycleJson<Cycle2Synthesis>(cycle2SynthesisSchema, synthesisJson);
+  } else {
+    synthesis = await synthesizeDoctorDecision({
+      audioBase64: input.audioBase64,
+      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      cycle1Context: prior.cycle1,
+    });
+  }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;
   const audioRef = await saveAudio(sessionId, 'cycle-2', input.audioBase64, input.mimeType ?? 'audio/webm');
 
-  const stored: StoredAnalysis = { cycle1: prior.cycle1, cycle2: synthesis };
+  const stored: StoredAnalysis = { cycle1: prior.cycle1, cycle2: synthesis, transcript: prior.transcript, decisionTranscript };
 
   await db.$transaction(async (tx) => {
     await tx.scribeSession.update({
@@ -324,6 +528,7 @@ export async function runCycle2DoctorDecision(
     soap: synthesis.soap,
     prescriptions: synthesis.prescriptions,
     finalDiagnosis: synthesis.finalDiagnosis,
+    evidence: synthesis.evidence ?? [],
   };
 }
 
@@ -334,6 +539,35 @@ async function nextDraftVersion(tx: Prisma.TransactionClient, sessionId: string)
     select: { version: true },
   });
   return (latest?.version ?? 0) + 1;
+}
+
+// ---------------------------------------------------------------------------
+// GET /sessions/:id/transcript [DOCTOR] -> stored cleaned transcript,
+// labeled by patient name + session date.
+// ---------------------------------------------------------------------------
+export interface ScribeTranscriptResponse {
+  readonly sessionId: string;
+  readonly patientName: string;
+  readonly sessionDate: string;
+  readonly transcript: StoredTranscript | null;
+  readonly decisionTranscript: StoredTranscript | null;
+}
+
+export async function getScribeTranscript(
+  sessionId: string,
+  _actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<ScribeTranscriptResponse> {
+  const session = await requireSessionRow(db, sessionId);
+  const patient = await db.patient.findUnique({ where: { id: session.patientId }, select: { fullName: true } });
+  const stored = await loadStoredAnalysis(db, sessionId);
+  return {
+    sessionId,
+    patientName: patient?.fullName ?? 'غير معروف',
+    sessionDate: sessionDateOf(session),
+    transcript: stored.transcript,
+    decisionTranscript: stored.decisionTranscript,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,13 @@ import {
   synthesizeDoctorDecision,
 } from '../src/modules/ai-scribe/gemini.provider.js';
 import {
+  CYCLE_0_CLEANUP_PROMPT,
+} from '../src/modules/ai-scribe/prompts/scribe.prompts.js';
+import {
+  cleanupTranscriptSchema,
+  renderCleanedTranscript,
+} from '../src/modules/ai-scribe/groq.provider.js';
+import {
   audioUploadSchema,
   commitSessionSchema,
   createSessionSchema,
@@ -60,6 +67,7 @@ interface FakeSessionRow {
   consentStatus: string;
   withdrawnAt: Date | null;
   withdrawalReason: string | null;
+  createdAt: Date;
 }
 
 interface FakeDbState {
@@ -118,6 +126,7 @@ function makeFakeDb(state: FakeDbState): PrismaClient {
           consentStatus: 'GRANTED',
           withdrawnAt: null,
           withdrawalReason: null,
+          createdAt: new Date('2026-10-14T10:00:00Z'),
         });
         return Promise.resolve({ id });
       },
@@ -292,6 +301,7 @@ delete process.env['GEMINI_MODEL'];
     symptoms: ['insomnia'],
     moodAndAffect: 'Low, restricted',
     suggestions: ['Clarify sleep'],
+    evidence: [],
   };
   let seenContext = '';
   const mocked =
@@ -300,6 +310,7 @@ delete process.env['GEMINI_MODEL'];
       soap: { S: 'Patient reports low mood', O: 'Flat affect observed', A: 'MDD moderate', P: 'Start SSRI, follow up 2 weeks' },
       prescriptions: [{ drugName: 'Sertraline', dosage: '50mg', frequency: 'once daily', instructions: 'after food for 14 days' }],
       finalDiagnosis: 'Major depressive disorder, moderate',
+      evidence: [{ section: 'S', claim: 'patient reports low mood', quote: 'I feel low', speaker: 'patient' }],
     }) +
     '\n```';
   const out = await synthesizeDoctorDecision({
@@ -316,6 +327,8 @@ delete process.env['GEMINI_MODEL'];
   assert.equal(out.prescriptions[0]?.drugName, 'Sertraline');
   assert.equal(out.finalDiagnosis, 'Major depressive disorder, moderate');
   assert.ok(seenContext.includes('Low mood'), 'cycle 1 context must be forwarded to cycle 2');
+  // Evidence carries a speaker label through to the wire (single-speaker quotes).
+  assert.deepEqual(out.evidence, [{ section: 'S', claim: 'patient reports low mood', quote: 'I feel low', speaker: 'patient' }]);
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +694,7 @@ delete process.env['GEMINI_MODEL'];
     consentStatus: 'GRANTED',
     withdrawnAt: null,
     withdrawalReason: null,
+    createdAt: new Date('2026-10-14T10:00:00Z'),
   };
   state.sessions.set('expired-active', {
     ...base,
@@ -742,6 +756,7 @@ delete process.env['GEMINI_MODEL'];
     consentStatus: 'GRANTED',
     withdrawnAt: null,
     withdrawalReason: null,
+    createdAt: new Date('2026-10-14T10:00:00Z'),
     status: 'TRANSCRIBED',
     audioReference: '/tmp/raced.cycle-1.webm',
     audioRetentionUntil: past,
@@ -885,6 +900,104 @@ delete process.env['GEMINI_MODEL'];
     thrown = err;
   }
   assert.ok(thrown instanceof AppError && thrown.code === 'CONFLICT' && thrown.statusCode === 409);
+}
+
+// ---------------------------------------------------------------------------
+// Cycle 0 (Groq path): transcript cleanup schema + rendering.
+// ---------------------------------------------------------------------------
+{
+  assert.equal(typeof CYCLE_0_CLEANUP_PROMPT, 'string');
+  assert.ok(CYCLE_0_CLEANUP_PROMPT.includes('segments'), 'cleanup prompt must document segments');
+  assert.ok(CYCLE_0_CLEANUP_PROMPT.includes('speaker'), 'cleanup prompt must document speaker labels');
+
+  const good = cleanupTranscriptSchema.safeParse({
+    segments: [
+      { speaker: 'doctor', text: 'مساء الخير، إيه اللي جايبك النهارده؟' },
+      { speaker: 'patient', text: 'مش عارف أنام من ثلاثة أسابيع.' },
+    ],
+  });
+  assert.equal(good.success, true);
+  assert.equal(
+    renderCleanedTranscript([
+      { speaker: 'doctor', text: 'أ' },
+      { speaker: 'patient', text: 'ب' },
+      { speaker: 'unsure', text: 'ج' },
+    ]),
+    'الدكتور: أ\nالمريضة: ب\nغير مؤكد: ج',
+  );
+  assert.equal(
+    cleanupTranscriptSchema.safeParse({ segments: [{ speaker: 'nurse', text: 'x' }] }).success,
+    false,
+    'unknown speaker must be rejected',
+  );
+  assert.equal(
+    cleanupTranscriptSchema.safeParse({ segments: [{ speaker: 'doctor', text: '', extra: 1 }] }).success,
+    false,
+    'strict segment shape must be enforced',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Groq 3-stage reuse: same Cycle-2 bytes reuse the cleaned transcript with
+// ZERO extra STT/cleanup calls (one extra qwen call per session, max).
+// ---------------------------------------------------------------------------
+{
+  const state = emptyState();
+  const db = makeFakeDb(state);
+
+  const started = await startScribeSession(CONSENTED_START, DOCTOR, db);
+
+  const cycle1Json = JSON.stringify({
+    chiefComplaint: 'Follow-up anxiety',
+    symptoms: ['broken sleep'],
+    moodAndAffect: 'Stable',
+    suggestions: ['Keep sleep hygiene'],
+    evidence: [],
+  });
+  const cycle2Json = JSON.stringify({
+    soap: { S: 's', O: 'o', A: 'a', P: 'p' },
+    prescriptions: [],
+    finalDiagnosis: 'GAD',
+    evidence: [],
+  });
+
+  let transcribes = 0;
+  let cleanups = 0;
+  let analyzes = 0;
+  const stages = {
+    transcribe: async (): Promise<string> => {
+      transcribes += 1;
+      return 'RAW';
+    },
+    cleanup: async (): Promise<{ segments: { speaker: 'patient'; text: string }[]; cleanedText: string }> => {
+      cleanups += 1;
+      return { segments: [{ speaker: 'patient' as const, text: 'x' }], cleanedText: 'المريضة: x' };
+    },
+    analyze: async (input: { systemPrompt: string }): Promise<string> => {
+      analyzes += 1;
+      return input.systemPrompt.includes('INITIAL SESSION ANALYSIS') ? cycle1Json : cycle2Json;
+    },
+  };
+  const deps = { groqStages: stages, saveAudio: noopSaveAudio };
+
+  const c1 = await runCycle1Consultation(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db);
+  assert.equal(transcribes, 1, 'cycle 1 transcribes once');
+  assert.equal(cleanups, 1, 'cycle 1 cleans once');
+  assert.equal(analyzes, 1, 'cycle 1 analyzes once');
+  assert.equal(c1.analysis.transcript?.cleanedText, 'المريضة: x', 'cleaned transcript reaches the wire');
+
+  // Same bytes for Cycle 2 (the UI sends one recording for both cycles).
+  await runCycle2DoctorDecision(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db);
+  assert.equal(transcribes, 1, 'same audio must NOT re-transcribe');
+  assert.equal(cleanups, 1, 'same audio must NOT re-clean');
+  assert.equal(analyzes, 2, 'cycle 2 analyzes once more (the single extra call)');
+
+  // Different bytes (fresh dictation) run the full pipeline again.
+  const OTHER_AUDIO = Buffer.from('different-audio-bytes').toString('base64');
+  await runCycle2DoctorDecision(started.sessionId, { audioBase64: OTHER_AUDIO }, DOCTOR, deps, db);
+  assert.equal(transcribes, 2, 'new audio must transcribe again');
+  assert.equal(cleanups, 2, 'new audio must clean again');
+  assert.equal(analyzes, 3, 'new audio analyzes again');
 }
 
 // Restore key env (do not leak test mutations).

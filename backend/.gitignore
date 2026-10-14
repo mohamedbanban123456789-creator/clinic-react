@@ -9,3 +9,5 @@ Thumbs.db
 prisma/*.db
 prisma/*.db-journal
 data/scribe-audio/
+# Disposable-DB connection info (throwaway credentials, rewritten each boot).
+qa-info.json

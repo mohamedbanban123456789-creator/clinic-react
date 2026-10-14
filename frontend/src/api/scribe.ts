@@ -6,6 +6,7 @@ import type {
   ScribeCommitDto,
   ScribeCycle2Dto,
   ScribeSessionDto,
+  ScribeTranscriptDto,
   MseDto,
   SoapDto,
 } from "./types"
@@ -65,6 +66,10 @@ export const scribeApi = {
     return apiRequest(`/scribe/sessions/${sessionId}/purge-audio`, {
       method: "POST",
     })
+  },
+
+  transcript(sessionId: string): Promise<ScribeTranscriptDto> {
+    return apiRequest(`/scribe/sessions/${sessionId}/transcript`)
   },
 
   withdrawConsent(

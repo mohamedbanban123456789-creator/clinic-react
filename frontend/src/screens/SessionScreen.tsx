@@ -19,6 +19,7 @@ import { queueApi } from "@/api/queue"
 import { scribeApi } from "@/api/scribe"
 import { ehrApi } from "@/api/ehr"
 import { vaultApi } from "@/api/vault"
+import type { ScribeEvidenceItem } from "@/api/types"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, useToast, SelectField } from "@/components/ui"
 import { useQueue } from "@/hooks/useQueue"
@@ -26,6 +27,51 @@ import { arNum, arAgo, arTimer } from "@/lib/format"
 import { mseFieldLabel, mseOptions } from "@/lib/constants"
 
 type RecorderState = "idle" | "recording" | "paused" | "processing" | "ready" | "error"
+
+const evidenceSectionLabel: Record<string, string> = {
+  S: "S — الذاتي",
+  O: "O — الموضوعي",
+  A: "A — التقييم",
+  P: "P — الخطة",
+  diagnosis: "التشخيص",
+  prescription: "الروشتة",
+  chiefComplaint: "الشكوى الرئيسية",
+  symptoms: "الأعراض",
+  moodAndAffect: "المزاج والوجدان",
+  suggestions: "مقترحات الفحص",
+}
+
+const evidenceSpeakerLabel: Record<string, string> = {
+  doctor: "الدكتور",
+  patient: "المريضة",
+  unsure: "غير مؤكد",
+}
+
+const evidenceSectionOrder = [
+  "S",
+  "O",
+  "A",
+  "P",
+  "diagnosis",
+  "prescription",
+  "chiefComplaint",
+  "symptoms",
+  "moodAndAffect",
+  "suggestions",
+]
+
+function groupEvidenceBySection(items: ScribeEvidenceItem[]): { section: string; items: ScribeEvidenceItem[] }[] {
+  const order = new Map(evidenceSectionOrder.map((s, i) => [s, i]))
+  const groups = new Map<string, ScribeEvidenceItem[]>()
+  for (const e of items) {
+    const list = groups.get(e.section) ?? []
+    list.push(e)
+    groups.set(e.section, list)
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (order.get(a) ?? 99) - (order.get(b) ?? 99))
+    .map(([section, sectionItems]) => ({ section, items: sectionItems }))
+}
 
 export default function SessionScreen() {
   const navigate = useNavigate()
@@ -65,11 +111,24 @@ export default function SessionScreen() {
       instructions: string
     }[]
     finalDiagnosis: string
+    evidence: ScribeEvidenceItem[]
+  } | null>(null)
+  const [analysis, setAnalysis] = useState<{
+    chiefComplaint: string
+    symptoms: string[]
+    moodAffect: string
+    suggestions: { text: string; provenance: "AI" }[]
+    evidence: ScribeEvidenceItem[]
+    transcript: {
+      cleanedText: string
+      segments: { speaker: "doctor" | "patient" | "unsure"; text: string }[]
+    } | null
   } | null>(null)
   const mediaRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   const patientQuery = useQuery({
     queryKey: ["patient", current?.patientId ?? patientParam ?? ""],
@@ -111,6 +170,8 @@ export default function SessionScreen() {
 
   const startRecording = async () => {
     setAiError(null)
+    setCycle2(null)
+    setAnalysis(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
@@ -153,6 +214,49 @@ export default function SessionScreen() {
     return created.sessionId
   }
 
+  const processAudio = async (audioBase64: string, mimeType: string) => {
+    setState("processing")
+    setAiError(null)
+    try {
+      const sid = await createScribeSession()
+      if (audioBase64.length > 15_000_000) {
+        throw new ApiError(413, "PAYLOAD_TOO_LARGE", "التسجيل أطول من الحد المسموع — قصّره وأعد المحاولة")
+      }
+      const first = await scribeApi.cycle1(sid, audioBase64, mimeType)
+      setAnalysis({
+        chiefComplaint: first.analysis.chiefComplaint ?? "",
+        symptoms: first.analysis.symptoms ?? [],
+        moodAffect: first.analysis.moodAffect ?? "",
+        suggestions: first.analysis.suggestions ?? [],
+        evidence: first.analysis.evidence ?? [],
+        transcript: first.analysis.transcript ?? null,
+      })
+      const second = await scribeApi.cycle2(sid, audioBase64, mimeType)
+      setCycle2({
+        soap: {
+          S: second.soap.S ?? "",
+          O: second.soap.O ?? "",
+          A: second.soap.A ?? "",
+          P: second.soap.P ?? "",
+        },
+        prescriptions: second.prescriptions ?? [],
+        finalDiagnosis: second.finalDiagnosis ?? "",
+        evidence: second.evidence ?? [],
+      })
+      setState("ready")
+      notify("تمت معالجة التسجيل — مسودة SOAP جاهزة للمراجعة")
+    } catch (err) {
+      if (err instanceof ApiError && (err.code === "GEMINI_KEY_MISSING" || err.code === "GROQ_KEY_MISSING")) {
+        setAiUnavailable(true)
+        setAiError("معالجة الصوت غير مفعلة على الخادم (مفتاح AI غير مكون) — يمكنك التوثيق يدويًا.")
+        setState("error")
+      } else {
+        setAiError(apiErrorMessage(err))
+        setState("error")
+      }
+    }
+  }
+
   const stopRecording = () => {
     const recorder = mediaRef.current
     if (!recorder) return
@@ -161,37 +265,30 @@ export default function SessionScreen() {
       streamRef.current?.getTracks().forEach((t) => t.stop())
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })
       try {
-        const sid = await createScribeSession()
         const audioBase64 = await blobToBase64(blob)
-        if (audioBase64.length > 15_000_000) {
-          throw new ApiError(413, "PAYLOAD_TOO_LARGE", "التسجيل أطول من الحد المسموع — قصّره وأعد المحاولة")
-        }
-        await scribeApi.cycle1(sid, audioBase64, blob.type)
-        const second = await scribeApi.cycle2(sid, audioBase64, blob.type)
-        setCycle2({
-          soap: {
-            S: second.soap.S ?? "",
-            O: second.soap.O ?? "",
-            A: second.soap.A ?? "",
-            P: second.soap.P ?? "",
-          },
-          prescriptions: second.prescriptions,
-          finalDiagnosis: second.finalDiagnosis,
-        })
-        setState("ready")
-        notify("تمت معالجة التسجيل — مسودة SOAP جاهزة للمراجعة")
+        await processAudio(audioBase64, blob.type || "audio/webm")
       } catch (err) {
-        if (err instanceof ApiError && err.code === "GEMINI_KEY_MISSING") {
-          setAiUnavailable(true)
-          setAiError("معالجة الصوت غير مفعلة على الخادم (مفتاح AI غير مكون) — يمكنك التوثيق يدويًا.")
-          setState("error")
-        } else {
-          setAiError(apiErrorMessage(err))
-          setState("error")
-        }
+        setAiError(err instanceof ApiError ? apiErrorMessage(err) : "فشل تحويل التسجيل")
+        setState("error")
       }
     }
     recorder.stop()
+  }
+
+  const uploadAudioFile = async (file: File) => {
+    setCycle2(null)
+    setAnalysis(null)
+    try {
+      if (file.size > 11_000_000) {
+        notify("الملف أكبر من الحد المسموح (~11MB) — اختر مقطعًا أقصر", "error")
+        return
+      }
+      const audioBase64 = await blobToBase64(file)
+      await processAudio(audioBase64, file.type || "audio/webm")
+    } catch {
+      setAiError("تعذر قراءة الملف الصوتي")
+      setState("error")
+    }
   }
 
   const commitMutation = useMutation({
@@ -349,6 +446,20 @@ export default function SessionScreen() {
                 <AppButton variant="outline" icon="file" onClick={() => setShowManual(true)}>
                   توثيق يدوي بدون تسجيل
                 </AppButton>
+                <AppButton variant="outline" icon="file" onClick={() => fileRef.current?.click()}>
+                  رفع ملف صوتي للتجربة
+                </AppButton>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="audio/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = ""
+                    if (f) void uploadAudioFile(f)
+                  }}
+                />
               </>
             )}
             {(state === "recording" || state === "paused") && (
@@ -383,6 +494,131 @@ export default function SessionScreen() {
             )}
           </div>
         </section>
+
+        {state === "ready" && cycle2 && (
+          <section className="card ai-review">
+            <div className="card-header">
+              <div>
+                <span className="section-kicker">مراجعة الطبيب قبل الاعتماد</span>
+                <h3>مسودة SOAP المقترحة</h3>
+                <p>راجع كل قسم مع دليله الصوتي — أي اقتباس مشكوك فيه يعني أن المساعد ربما سمع غلط.</p>
+              </div>
+              <span>
+                <Icon name="sparkle" size={14} /> AI
+              </span>
+            </div>
+            {(["S", "O", "A", "P"] as const).map((letter) => (
+              <article className="soap-section" key={letter}>
+                <div className="soap-letter">{letter}</div>
+                <div>
+                  <h3>{evidenceSectionLabel[letter]}</h3>
+                  <p>{cycle2.soap[letter] || "—"}</p>
+                </div>
+              </article>
+            ))}
+            {cycle2.finalDiagnosis && (
+              <article className="soap-section">
+                <div className="soap-letter">Dx</div>
+                <div>
+                  <h3>التشخيص المقترح</h3>
+                  <p>{cycle2.finalDiagnosis}</p>
+                </div>
+              </article>
+            )}
+            {cycle2.prescriptions.length > 0 && (
+              <article className="soap-section">
+                <div className="soap-letter">Rx</div>
+                <div>
+                  <h3>الروشتة المقترحة</h3>
+                  {cycle2.prescriptions.map((p, i) => (
+                    <p key={i}>
+                      • {p.drugName} {p.dosage} — {p.frequency} ({p.instructions})
+                    </p>
+                  ))}
+                </div>
+              </article>
+            )}
+            <article className="soap-section">
+              <div className="soap-letter">؟</div>
+              <div>
+                <h3>الأدلة الصوتية — ماذا سمع المساعد فعلاً؟</h3>
+                {cycle2.evidence.length === 0 && (analysis?.evidence.length ?? 0) === 0 && (
+                  <p>لا أدلة مرفقة — راجع التسجيل يدويًا قبل الاعتماد.</p>
+                )}
+                {groupEvidenceBySection(cycle2.evidence).map((g) => (
+                  <div key={`c2-${g.section}`} style={{ marginBottom: "6px" }}>
+                    <strong>{evidenceSectionLabel[g.section] ?? g.section}</strong>
+                    {g.items.map((e, i) => (
+                      <p key={i} style={{ margin: "2px 0" }}>
+                        <span className="method-pill">{evidenceSpeakerLabel[e.speaker] ?? e.speaker}</span>{" "}
+                        {e.claim}
+                        {e.quote ? (
+                          <><br />«{e.quote}»</>
+                        ) : (
+                          <><br />⚠ بلا دليل مسموع — تحقق بنفسك</>
+                        )}
+                      </p>
+                    ))}
+                  </div>
+                ))}
+                {(analysis?.evidence.length ?? 0) > 0 && (
+                  <>
+                    <h3 style={{ marginTop: "8px" }}>أدلة التحليل الأولي</h3>
+                    {groupEvidenceBySection(analysis!.evidence).map((g) => (
+                      <div key={`c1-${g.section}`} style={{ marginBottom: "6px" }}>
+                        <strong>{evidenceSectionLabel[g.section] ?? g.section}</strong>
+                        {g.items.map((e, i) => (
+                          <p key={i} style={{ margin: "2px 0" }}>
+                            <span className="method-pill">{evidenceSpeakerLabel[e.speaker] ?? e.speaker}</span>{" "}
+                            {e.claim}
+                            {e.quote ? (
+                              <><br />«{e.quote}»</>
+                            ) : (
+                              <><br />⚠ بلا دليل مسموع — تحقق بنفسك</>
+                            )}
+                          </p>
+                        ))}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </article>
+            {analysis && analysis.transcript && (
+              <article className="soap-section">
+                <div className="soap-letter">T</div>
+                <div>
+                  <details>
+                    <summary>
+                      <strong>التفريغ المنقح للجلسة (بالمتحدثين)</strong> — {analysis.transcript.segments.length} مقطع
+                    </summary>
+                    <div style={{ marginTop: "8px", maxHeight: "320px", overflowY: "auto" }}>
+                      {analysis.transcript.segments.map((seg, i) => (
+                        <p key={i} style={{ margin: "4px 0" }}>
+                          <span className="method-pill">{evidenceSpeakerLabel[seg.speaker] ?? seg.speaker}</span>{" "}
+                          {seg.text}
+                        </p>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              </article>
+            )}
+            {analysis && (
+              <article className="soap-section">
+                <div className="soap-letter">i</div>
+                <div>
+                  <h3>ملخص التحليل الأولي</h3>
+                  <p><strong>الشكوى:</strong> {analysis.chiefComplaint || "—"}</p>
+                  <p><strong>المزاج:</strong> {analysis.moodAffect || "—"}</p>
+                  {analysis.symptoms.map((s, i) => (
+                    <p key={i}>• {s}</p>
+                  ))}
+                </div>
+              </article>
+            )}
+          </section>
+        )}
 
         <section className="card live-notes">
           <div className="card-header">

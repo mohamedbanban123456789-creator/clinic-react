@@ -4,6 +4,7 @@ import { requireRole } from '../../common/middleware/requireRole.js';
 import { validate } from '../../common/middleware/validate.js';
 import {
   commitScribeSession,
+  getScribeTranscript,
   purgeScribeAudioFiles,
   runCycle1Consultation,
   runCycle2DoctorDecision,
@@ -99,6 +100,21 @@ scribeRouter.post(
       userId: auth.userId,
       role: auth.role,
     })
+      .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+
+// GET /api/v1/scribe/sessions/:id/transcript [DOCTOR] -> stored transcript
+// labeled by patient name + session date (cleaned, speaker-segmented).
+scribeRouter.get(
+  '/sessions/:id/transcript',
+  requireRole('DOCTOR'),
+  validate(sessionIdParamSchema, 'params'),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    getScribeTranscript(params.id, { userId: auth.userId, role: auth.role })
       .then((out) => res.status(200).json(out))
       .catch(next);
   },

@@ -34,9 +34,17 @@ const EnvSchema = z
     VAULT_KEK_ID: z.string().min(1).default('v1'),
     // Sprint 6 AI scribe (Gemini): API key optional at boot so CI/tests boot
     // without a live paid key; gemini.provider.ts enforces at use with
-    // AppError('GEMINI_KEY_MISSING'). Model defaults to gemini-2.0-flash.
+    // AppError('GEMINI_KEY_MISSING'). Model defaults to gemini-3.5-flash-lite.
     GEMINI_API_KEY: z.string().trim().min(1).optional(),
-    GEMINI_MODEL: z.string().trim().min(1).default('gemini-2.0-flash'),
+    GEMINI_MODEL: z.string().trim().min(1).default('gemini-3.5-flash-lite'),
+    // Scribe provider switch: 'groq' (Whisper STT + Qwen chat, default) or
+    // 'gemini' (legacy direct-audio path — kept, disabled by default).
+    SCRIBE_PROVIDER: z.enum(['groq', 'gemini']).default('groq'),
+    GROQ_API_KEY: z.string().trim().min(1).optional(),
+    GROQ_STT_MODEL: z.string().trim().min(1).default('whisper-large-v3'),
+    GROQ_CHAT_MODEL: z.string().trim().min(1).default('qwen/qwen3.8-27b'),
+    GROQ_MAX_TOKENS: z.coerce.number().int().positive().default(4096),
+    GROQ_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   })
   .refine((e) => e.JWT_SECRET !== e.JWT_REFRESH_SECRET, {
     message: 'JWT_SECRET and JWT_REFRESH_SECRET must differ',

@@ -16,7 +16,7 @@ import { CYCLE_1_ANALYSIS_PROMPT, CYCLE_2_SYNTHESIS_PROMPT } from './prompts/scr
  *   Gemini without network/keys.
  */
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 export const GEMINI_RESPONSE_MIME_TYPE = 'application/json';
 
 export interface GeminiConfig {
@@ -48,12 +48,32 @@ export function resolveGeminiConfig(): GeminiConfig {
 // Structured output schemas (Zod sole validation; failure -> 422 envelope).
 // ---------------------------------------------------------------------------
 
+/**
+ * Audio evidence item: grounds one AI statement in something actually heard.
+ * `section` names the supported part of the output (Cycle 1:
+ * chiefComplaint|symptoms|moodAndAffect|suggestions; Cycle 2:
+ * S|O|A|P|diagnosis|prescription). `claim` is the AI's understanding,
+ * `quote` the verbatim audio excerpt behind it ("" when unsupported — the
+ * doctor reviews these to catch mishearings before signing). `speaker`
+ * names who uttered the quote (doctor|patient|unsure) so mixed-speaker
+ * quotes are structurally impossible to sneak past review.
+ */
+export const evidenceItemSchema = z
+  .object({
+    section: z.string().trim().min(1).max(60),
+    claim: z.string().trim().min(1).max(1000),
+    quote: z.string().trim().max(2000).default(''),
+    speaker: z.enum(['doctor', 'patient', 'unsure']).default('unsure'),
+  })
+  .strict();
+
 export const cycle1AnalysisSchema = z
   .object({
     chiefComplaint: z.string().trim().min(1).max(2000),
     symptoms: z.array(z.string().trim().min(1).max(500)).max(50),
     moodAndAffect: z.string().trim().min(1).max(2000),
     suggestions: z.array(z.string().trim().min(1).max(1000)).max(50),
+    evidence: z.array(evidenceItemSchema).max(30).default([]),
   })
   .strict();
 
@@ -80,10 +100,12 @@ export const cycle2SynthesisSchema = z
     soap: soapSchema,
     prescriptions: z.array(prescriptionItemSchema).max(30).default([]),
     finalDiagnosis: z.string().trim().max(2000).default(''),
+    evidence: z.array(evidenceItemSchema).max(40).default([]),
   })
   .strict();
 
 export type Cycle1Analysis = z.infer<typeof cycle1AnalysisSchema>;
+export type EvidenceItem = z.infer<typeof evidenceItemSchema>;
 export type PrescriptionItem = z.infer<typeof prescriptionItemSchema>;
 export type Soap = z.infer<typeof soapSchema>;
 export type Cycle2Synthesis = z.infer<typeof cycle2SynthesisSchema>;
@@ -112,13 +134,13 @@ function stripCodeFences(raw: string): string {
   return withoutClose.trim();
 }
 
-function parseJsonOrThrow(raw: string): unknown {
+export function parseJsonOrThrow(raw: string): unknown {
   const cleaned = stripCodeFences(raw);
   try {
     return JSON.parse(cleaned) as unknown;
   } catch {
-    throw new AppError('UNPROCESSABLE', 'Gemini did not return valid JSON', [
-      { field: 'gemini', issue: 'non-JSON model output', expected: 'strict JSON per scribe prompt' },
+    throw new AppError('UNPROCESSABLE', 'AI model did not return valid JSON', [
+      { field: 'scribe', issue: 'non-JSON model output', expected: 'strict JSON per scribe prompt' },
     ]);
   }
 }
