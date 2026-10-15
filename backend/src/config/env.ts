@@ -3,7 +3,15 @@ import { z } from 'zod';
 
 const EnvSchema = z
   .object({
-    DATABASE_URL: z.string().min(1),
+    DATABASE_URL: z.string().min(1).transform((url) => {
+      let finalUrl = url;
+      if (!finalUrl.includes('client_encoding')) {
+        const sep = finalUrl.includes('?') ? '&' : '?';
+        finalUrl = `${finalUrl}${sep}client_encoding=utf8`;
+      }
+      process.env.DATABASE_URL = finalUrl;
+      return finalUrl;
+    }),
     JWT_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: z.string().default('15m'),
@@ -24,6 +32,7 @@ const EnvSchema = z
     AUDIO_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
     SEED_DOCTOR_IDENTIFIER: z.string().min(1).default('doctor'),
     SEED_DOCTOR_PASSWORD: z.string().min(8).default('ChangeMe123!'),
+    SEED_DOCTOR_NAME: z.string().trim().min(1).default('د. أحمد سامي'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     APP_DB_ROLE: z.string().default('clinic_app'),

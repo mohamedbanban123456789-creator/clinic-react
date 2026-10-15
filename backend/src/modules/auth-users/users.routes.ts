@@ -18,7 +18,7 @@ export const usersRouter: Router = Router();
 usersRouter.use(authenticate, requireRole('DOCTOR'), requireFreshPassword);
 
 usersRouter.post(
-  '/secretaries',
+  ['/secretaries', '/'],
   validate(createSecretarySchema),
   (req: Request, res: Response, next: NextFunction): void => {
     const auth = requireAuth(req);

@@ -90,6 +90,7 @@ function mockRes(): Response {
 /** BE-104 (3): create-secretary Zod — all fields required non-blank; password min 8. */
 {
   assert.equal(createSecretarySchema.safeParse({ name: 'A', identifier: 's1', password: 'longenough1' }).success, true);
+  assert.equal(createSecretarySchema.safeParse({ name: 'سارة محمود أحمد', identifier: 'sara_sec', password: 'longenough1' }).success, true, 'Arabic secretary name accepted');
   for (const bad of [
     { name: '   ', identifier: 's1', password: 'longenough1' },
     { name: 'A', identifier: '', password: 'longenough1' },
@@ -106,9 +107,10 @@ function mockRes(): Response {
 
 /** BE-104 (4): DTOs are allowlisted SecretSafe (no passwordHash/tokenVersion keys). */
 {
-  const dto = toManagedUserDto({ id: 'u1', name: 'Sec', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  const dto = toManagedUserDto({ id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
   assert.equal(isSecretSafe(dto), true);
-  assert.deepEqual({ ...dto }, { id: 'u1', name: 'Sec', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  assert.deepEqual({ ...dto }, { id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  assert.equal(dto.name, 'سارة محمود', 'Arabic name preserved verbatim');
   const act = toActivationDto({ id: 'u1', isActive: false });
   assert.equal(isSecretSafe(act), true);
   assert.deepEqual({ ...act }, { id: 'u1', isActive: false });

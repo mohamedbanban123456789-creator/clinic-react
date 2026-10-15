@@ -29,12 +29,19 @@ function isUniqueViolation(err: unknown): boolean {
 export async function ensureSeededDoctor(db: PrismaClient = prisma): Promise<SeedResult> {
   const env = loadEnv();
   const identifier = env.SEED_DOCTOR_IDENTIFIER.trim();
+  const doctorName = env.SEED_DOCTOR_NAME?.trim() || 'د. أحمد سامي';
 
   const activeDoctor = await db.user.findFirst({
     where: { role: 'DOCTOR', isActive: true },
-    select: { id: true, identifier: true },
+    select: { id: true, identifier: true, name: true },
   });
   if (activeDoctor !== null) {
+    if (activeDoctor.name === 'Doctor' || /^\?+$/.test(activeDoctor.name)) {
+      await db.user.update({
+        where: { id: activeDoctor.id },
+        data: { name: doctorName },
+      });
+    }
     return { id: activeDoctor.id, identifier: activeDoctor.identifier, created: false };
   }
 
@@ -42,7 +49,7 @@ export async function ensureSeededDoctor(db: PrismaClient = prisma): Promise<See
   try {
     const created = await db.user.create({
       data: {
-        name: 'Doctor',
+        name: doctorName,
         identifier,
         passwordHash,
         role: 'DOCTOR',

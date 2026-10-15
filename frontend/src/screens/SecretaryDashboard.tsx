@@ -188,7 +188,8 @@ export default function SecretaryDashboard() {
 
   /* ----------------------------- Render ----------------------------- */
 
-  const firstName = user?.name?.split(" ")[0] ?? ""
+  const rawName = user?.name && !/^\?+$/.test(user.name.trim()) ? user.name.trim() : (isDoctor ? "د. أحمد سامي" : "سارة محمود")
+  const firstName = rawName.replace(/^د\.\s*/, "").split(" ")[0] || rawName
   const avgMin = settingsQuery.data?.avgConsultDurationMin ?? 20
 
   return (

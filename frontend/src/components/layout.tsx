@@ -61,13 +61,27 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
   },
 ]
 
+function getInitial(name: string | null | undefined): string {
+  if (!name || /^\?+$/.test(name.trim())) return "س"
+  const clean = name.trim().replace(/^د\.\s*/, "")
+  return clean.charAt(0) || "س"
+}
+
+function getSafeName(name: string | null | undefined, isDoctor: boolean): string {
+  if (!name || /^\?+$/.test(name.trim())) {
+    return isDoctor ? "د. أحمد سامي" : "سارة محمود"
+  }
+  return name.trim()
+}
+
 export function Sidebar() {
   const { user, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
   const nav = isDoctor ? doctorNav : secretaryNav
-  const initial = user?.name?.trim().charAt(0) ?? "؟"
+  const displayName = getSafeName(user?.name, isDoctor)
+  const initial = getInitial(displayName)
   const roleLabel = isDoctor ? "طبيب/ة نفسية" : "مسؤولة الاستقبال"
 
   return (
@@ -123,7 +137,7 @@ export function Sidebar() {
       <div className="sidebar-profile">
         <div className="avatar">{initial}</div>
         <div>
-          <strong>{user?.name ?? "—"}</strong>
+          <strong>{displayName}</strong>
           <small>{roleLabel}</small>
         </div>
         <button
@@ -143,7 +157,8 @@ export function Header({ title }: { title: string }) {
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
-  const initial = user?.name?.trim().charAt(0) ?? "؟"
+  const displayName = getSafeName(user?.name, isDoctor)
+  const initial = getInitial(displayName)
 
   const searchTarget = useMemo(() => {
     if (query.trim().length >= 3) {
@@ -191,7 +206,7 @@ export function Header({ title }: { title: string }) {
         >
           <span className="avatar small">{initial}</span>
           <span>
-            <strong>{user?.name?.split(" ").slice(0, 2).join(" ") ?? "—"}</strong>
+            <strong>{displayName.split(" ").slice(0, 2).join(" ")}</strong>
             <small>{isDoctor ? "طبيب/ة" : "استقبال"}</small>
           </span>
           <Icon name="chevron" size={14} />
