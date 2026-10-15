@@ -69,7 +69,7 @@ export const shiftsApi = {
   close(
     shiftId: string,
     actualCountedMinor: number,
-    opts: { force?: boolean; forceReason?: string } = {},
+    opts: { force?: boolean; forceReason?: string; reason?: string } = {},
   ): Promise<CloseShiftDto> {
     return apiRequest(`/shifts/${shiftId}/close`, {
       method: "POST",
@@ -77,6 +77,7 @@ export const shiftsApi = {
         actualCountedMinor,
         ...(opts.force !== undefined ? { force: opts.force } : {}),
         ...(opts.forceReason ? { forceReason: opts.forceReason } : {}),
+        ...(opts.reason ? { reason: opts.reason } : {}),
       },
       idempotency: true,
     })

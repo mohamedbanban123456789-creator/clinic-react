@@ -80,17 +80,20 @@ export const shiftCloseSchema = z
     actualCountedMinor: nonNegativeMinor('actualCountedMinor'),
     force: z.boolean().optional(),
     forceReason: trimmedText('forceReason', 10, 300).optional(),
+    reason: trimmedText('reason', 3, 300).optional(),
+    closeReason: trimmedText('closeReason', 3, 300).optional(),
   })
   .strict()
   .superRefine((val, ctx) => {
-    if (val.force === true && val.forceReason === undefined) {
+    const hasReason = val.forceReason !== undefined || val.reason !== undefined || val.closeReason !== undefined;
+    if (val.force === true && !hasReason) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['forceReason'],
-        message: 'forceReason is required (10-300 chars) when force is true',
+        message: 'forceReason or reason is required when force is true',
       });
     }
-    if (val.force !== true && val.forceReason !== undefined) {
+    if (val.force !== true && val.forceReason !== undefined && val.reason === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['force'],

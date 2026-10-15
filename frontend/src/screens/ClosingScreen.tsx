@@ -15,6 +15,7 @@ import { useShiftInvoices } from "@/hooks/useShiftInvoices"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useQueue } from "@/hooks/useQueue"
 import { arNum, arDate, arTime, moneyMinor, arPercent } from "@/lib/format"
 import { pettyDirectionLabel, shiftResultLabel } from "@/lib/constants"
 import type { CloseShiftDto } from "@/api/types"
@@ -130,9 +131,14 @@ export default function ClosingScreen() {
   const [showAddPetty, setShowAddPetty] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmAck, setConfirmAck] = useState(false)
-  const [forceClose, setForceClose] = useState(false)
-  const [forceReason, setForceReason] = useState("")
+  const [closeReason, setCloseReason] = useState("")
   const [closeResult, setCloseResult] = useState<CloseShiftDto | null>(null)
+
+  const { entries: queueEntries } = useQueue()
+  const waitingPatients = useMemo(
+    () => (queueEntries ?? []).filter((e) => e.status === "WAITING" || e.status === "IN_CONSULTATION"),
+    [queueEntries],
+  )
 
   const shiftQuery = useQuery({
     queryKey: ["shifts", "current"],
@@ -196,11 +202,14 @@ export default function ClosingScreen() {
   })
 
   const closeMutation = useMutation({
-    mutationFn: () =>
-      shiftsApi.close(reportShiftId!, Math.round(actual * 100), {
-        force: forceClose,
-        ...(forceClose && forceReason.trim() ? { forceReason: forceReason.trim() } : {}),
-      }),
+    mutationFn: () => {
+      const reason = closeReason.trim()
+      const hasWaiting = waitingPatients.length > 0
+      return shiftsApi.close(reportShiftId!, Math.round(actual * 100), {
+        force: hasWaiting || reason.length > 0,
+        ...(reason ? { forceReason: reason, reason } : {}),
+      })
+    },
     onSuccess: (result) => {
       setCloseResult(result)
       setConfirmClose(false)
@@ -208,13 +217,10 @@ export default function ClosingScreen() {
       void queryClient.invalidateQueries({ queryKey: ["shifts"] })
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["receipts"] })
+      void queryClient.invalidateQueries({ queryKey: ["queue"] })
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === "SHIFT_LOCKED") {
-        notify("توجد مرضى لم تكتمل زيارتهم — فعّل الإغلاق القسري مع السبب", "error")
-      } else {
-        notify(apiErrorMessage(err), "error")
-      }
+      notify(apiErrorMessage(err), "error")
     },
   })
 
@@ -500,33 +506,11 @@ export default function ClosingScreen() {
                 : "يعتمد النظام العد الأعمى: يبقى المتوقع مخفيًا حتى إدخال العد الفعلي."}
             </p>
           </div>
-          {isOpen && isDoctor && (
-            <>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={forceClose}
-                  onChange={(e) => setForceClose(e.target.checked)}
-                />
-                <span>إغلاق قسري (توجد زيارات غير مكتملة)</span>
-              </label>
-              {forceClose && (
-                <label className="field">
-                  <span>سبب الإغلاق القسري (١٠ أحرف على الأقل)</span>
-                  <input
-                    value={forceReason}
-                    onChange={(e) => setForceReason(e.target.value)}
-                    placeholder="مثال: انتهاء دوام العيادة مع مرضى متأخرين"
-                  />
-                </label>
-              )}
-            </>
-          )}
           {isOpen && (
             <AppButton
               icon="lock"
               onClick={() => setConfirmClose(true)}
-              disabled={actual < 0 || (forceClose && forceReason.trim().length < 10)}
+              disabled={actual < 0}
             >
               مراجعة واعتماد الإغلاق
             </AppButton>
@@ -610,6 +594,60 @@ export default function ClosingScreen() {
               الإدارية.
             </p>
           </div>
+
+          {waitingPatients.length > 0 && (
+            <div
+              style={{
+                margin: "1rem 0",
+                padding: "0.875rem",
+                borderRadius: "10px",
+                background: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid #f59e0b",
+                textAlign: "right",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  fontWeight: "bold",
+                  color: "#b45309",
+                  marginBottom: "0.5rem",
+                }}
+              >
+                <Icon name="alert" size={20} />
+                <span>
+                  تحذير: يوجد {arNum(waitingPatients.length)} مريض في قائمة الانتظار لم تكتمل زيارتهم بعد!
+                </span>
+              </div>
+              <ul style={{ margin: "0 1.25rem 0.5rem 0", padding: 0, fontSize: "0.9rem", color: "#92400e" }}>
+                {waitingPatients.map((p) => (
+                  <li key={p.entryId} style={{ margin: "0.25rem 0" }}>
+                    <b>{p.displayName}</b> — {p.status === "IN_CONSULTATION" ? "في غرفة الكشف حاليًا" : "في انتظار الدخول"}
+                  </li>
+                ))}
+              </ul>
+              <label className="field" style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#78350f" }}>
+                  سبب إغلاق اليوم مع وجود مرضى بالانتظار (مطلوب):
+                </span>
+                <input
+                  value={closeReason}
+                  onChange={(e) => setCloseReason(e.target.value)}
+                  placeholder="اكتب سبب الإغلاق (مثال: اعتذار المرضى / انتهاء موعد العمل بالعيادة)..."
+                  style={{
+                    width: "100%",
+                    padding: "0.5rem 0.75rem",
+                    borderRadius: "6px",
+                    border: "1px solid #d97706",
+                    fontSize: "0.9rem",
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
           <div className="confirm-summary">
             <span>
               النقد الفعلي المعدود <b>{moneyMinor(Math.round(actual * 100))}</b>
@@ -632,7 +670,11 @@ export default function ClosingScreen() {
             </AppButton>
             <AppButton
               onClick={() => closeMutation.mutate()}
-              disabled={closeMutation.isPending || !confirmAck}
+              disabled={
+                closeMutation.isPending ||
+                !confirmAck ||
+                (waitingPatients.length > 0 && closeReason.trim().length < 3)
+              }
             >
               {closeMutation.isPending ? "جارٍ الإغلاق..." : "اعتماد وإغلاق اليوم"}
             </AppButton>

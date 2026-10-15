@@ -284,16 +284,11 @@ export async function closeShift(
     ]);
   }
 
-  const force = input.force === true;
-  const forceReason = input.forceReason;
+  const effectiveReason = input.reason ?? input.closeReason ?? input.forceReason;
+  const force = input.force === true || effectiveReason !== undefined;
 
-  // Force is a DOCTOR-only escape hatch (CONV/RPS-2: force requires doctor+reason+audit).
-  if (force && actor.role !== 'DOCTOR') {
-    throw AppError.forbidden('Only a doctor may force-close a shift with open entries or invariant violations');
-  }
-  if (!force && forceReason !== undefined) {
-    throw new AppError('UNPROCESSABLE', 'forceReason is only accepted together with force: true');
-  }
+  // P1-5: The secretary or doctor can close the day with waiting patients or discrepancies
+  // when a reason is provided. The doctor-only force restriction has been removed.
 
   const result = await db.$transaction(async (tx) => {
     await lockShift(tx, shiftId);
@@ -304,18 +299,18 @@ export async function closeShift(
       throw new AppError('SHIFT_NOT_OPEN', `Shift ${shiftId} is already ${locked.status}`);
     }
 
-    // (2) Open queue entries block an orderly close unless forced.
+    // (2) Open queue entries block an orderly close unless a reason is provided.
     const openEntries = await tx.queueEntry.count({
       where: { shiftId, status: { in: ['WAITING', 'IN_CONSULTATION'] } },
     });
-    if (openEntries > 0 && !force) {
+    if (openEntries > 0 && !effectiveReason) {
       throw new AppError(
         'UNPROCESSABLE',
         `${openEntries} queue entr${openEntries === 1 ? 'y is' : 'ies are'} still WAITING or IN_CONSULTATION`, [
           {
-            field: 'force',
+            field: 'reason',
             issue: `${openEntries} open queue entr${openEntries === 1 ? 'y' : 'ies'} remain`,
-            expected: 'resolve the queue, or send force:true with forceReason as a DOCTOR',
+            expected: 'provide a reason to close with open queue entries',
           },
         ],
       );
@@ -331,11 +326,11 @@ export async function closeShift(
 
     // (5) Invariants gate (INV-1..INV-10 + APPX-D-3..6 via BE-306).
     const report: InvariantReport = await checkShiftInvariants(shiftId, tx);
-    if (!report.passed && !force) {
+    if (!report.passed && !effectiveReason) {
       const details = report.failures.map((f) => ({
         field: f.code,
         issue: f.detail,
-        expected: 'resolve the discrepancy, or force-close as a DOCTOR with a reason',
+        expected: 'resolve the discrepancy, or provide a reason to close',
       }));
       throw new AppError('INVARIANT_VIOLATION', `Shift failed ${report.failures.length} reconciliation invariant(s)`, details);
     }
@@ -349,11 +344,18 @@ export async function closeShift(
         actualCountedMinor: input.actualCountedMinor,
         differenceMinor,
         result: shiftResult,
-        integrityCheckPassed: report.passed,
+        integrityCheckPassed: report.passed && openEntries === 0,
         closedByUserId: actor.userId,
         closedAt: new Date(),
         closeIdempotencyKey: idempotencyKey,
         queueVersion: locked.queueVersion + 1,
+        ...(effectiveReason !== undefined
+          ? {
+              reviewNote: effectiveReason,
+              reviewedByUserId: actor.userId,
+              reviewedAt: new Date(),
+            }
+          : {}),
       },
       select: { id: true, queueVersion: true },
     });
@@ -365,7 +367,7 @@ export async function closeShift(
       entityType: 'Shift',
       entityId: shiftId,
       idempotencyKey,
-      reasonText: force === true && forceReason !== undefined ? forceReason : null,
+      reasonText: effectiveReason ?? null,
       beforeState: {
         status: 'OPEN',
         openingFloatMinor: locked.openingFloatMinor,
@@ -377,9 +379,10 @@ export async function closeShift(
         actualCountedMinor: input.actualCountedMinor,
         differenceMinor,
         result: shiftResult,
-        integrityCheckPassed: report.passed,
         forced: force,
-        ...(force === true && forceReason !== undefined ? { forceReason } : {}),
+        closedWithOpenEntries: openEntries > 0,
+        openEntriesCount: openEntries,
+        ...(effectiveReason !== undefined ? { forceReason: effectiveReason } : {}),
         invariantFailures: formatInvariantFailures(report),
         drawer: {
           cashChargeMinor: drawer.cashChargeMinor,

@@ -21,6 +21,7 @@ import {
   shiftCloseSchema,
   shiftOpenSchema,
 } from '../src/modules/cashier-shift/shift.validators.js';
+import { closeShift } from '../src/modules/cashier-shift/shift.service.js';
 
 // BE-304/305/306 acceptance: new AppError codes carry the contract status.
 {
@@ -281,3 +282,118 @@ import {
   assert.equal(mix.pettyExpenseMinor, 1500, 'expense leg');
   assert.equal(mix.pettyInjectionMinor, 5000, 'injection leg');
 }
+
+// ===========================================================================
+// P1-5 — Free day closing with waiting patients (Secretary can close with reason)
+// ===========================================================================
+{
+  assert.equal(
+    shiftCloseSchema.safeParse({ actualCountedMinor: 50000, reason: '2 waiting patients postponed' }).success,
+    true,
+    'reason accepted in shiftCloseSchema',
+  );
+
+  const fakeShift = {
+    id: 'shift-1',
+    businessDate: new Date('2026-10-15T00:00:00Z'),
+    status: 'OPEN',
+    openingFloatMinor: 10000,
+    queueVersion: 5,
+    actualCountedMinor: null,
+    expectedCashMinor: null,
+    differenceMinor: null,
+    result: null,
+    integrityCheckPassed: null,
+    closedByUserId: null,
+    closedAt: null,
+    closeIdempotencyKey: null,
+    reviewNote: null,
+    reviewedByUserId: null,
+    reviewedAt: null,
+  };
+
+  const auditEvents: Array<Record<string, unknown>> = [];
+
+  const fakeDb = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [],
+    $transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(fakeDb),
+    shift: {
+      findUnique: async () => fakeShift,
+      findUniqueOrThrow: async () => fakeShift,
+      update: async (args: { data: Record<string, unknown> }) => {
+        Object.assign(fakeShift, args.data);
+        return fakeShift;
+      },
+    },
+    queueEntry: {
+      count: async () => 2, // 2 waiting patients!
+      findMany: async () => [],
+    },
+    receipt: {
+      aggregate: async () => ({ _sum: { amountMinor: 0 } }),
+      findMany: async () => [],
+    },
+    pettyExpense: {
+      findMany: async () => [],
+    },
+    invoice: {
+      findMany: async () => [],
+    },
+    auditEvent: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        auditEvents.push(args.data);
+        return args.data;
+      },
+      findMany: async () => [],
+    },
+    clinicSettings: {
+      findUnique: async () => null,
+    },
+  };
+
+  // 1. Secretary closes with 2 waiting patients and NO reason -> rejected with UNPROCESSABLE
+  await assert.rejects(
+    () =>
+      closeShift(
+        'shift-1',
+        { actualCountedMinor: 10000 },
+        { userId: 'u-sec', role: 'SECRETARY' },
+        'idemp-close-1',
+        fakeDb as any,
+      ),
+    (err: unknown) =>
+      err instanceof AppError &&
+      err.code === 'UNPROCESSABLE' &&
+      err.message.includes('2 queue entries are still WAITING or IN_CONSULTATION'),
+    'Closing with open entries and no reason must fail',
+  );
+
+  // 2. Secretary closes with 2 waiting patients AND a reason -> SUCCEEDS!
+  const closeResult = await closeShift(
+    'shift-1',
+    {
+      actualCountedMinor: 10000,
+      reason: 'انتهى الدوام واعتذر المرضى عن الانتظار',
+    },
+    { userId: 'u-sec', role: 'SECRETARY' },
+    'idemp-close-2',
+    fakeDb as any,
+  );
+
+  assert.equal(closeResult.shiftId, 'shift-1');
+  assert.equal(closeResult.status, 'CLOSED');
+  assert.equal(fakeShift.status, 'CLOSED');
+  assert.equal(fakeShift.closedByUserId, 'u-sec');
+  assert.equal(fakeShift.reviewNote, 'انتهى الدوام واعتذر المرضى عن الانتظار');
+
+  // 3. Verify audit trail records the secretary role and reason
+  const closeAudit = auditEvents.find((a) => a.action === 'SHIFT_CLOSE');
+  assert.ok(closeAudit, 'SHIFT_CLOSE audit recorded');
+  assert.equal(closeAudit.actorUserId, 'u-sec');
+  assert.equal(closeAudit.actorRole, 'SECRETARY');
+  assert.equal(closeAudit.reasonText, 'انتهى الدوام واعتذر المرضى عن الانتظار');
+  assert.equal((closeAudit.afterState as Record<string, unknown>).closedWithOpenEntries, true);
+  assert.equal((closeAudit.afterState as Record<string, unknown>).openEntriesCount, 2);
+}
+
