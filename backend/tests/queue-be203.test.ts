@@ -9,6 +9,7 @@ import { normalizeArabic, normalizeName } from '../src/modules/identity-queue/pa
 import { searchPatients } from '../src/modules/identity-queue/patient.search.js';
 import type { PrismaClient } from '@prisma/client';
 import { AppError } from '../src/common/errors/AppError.js';
+import { toggleEmergency } from '../src/modules/identity-queue/queue.service.js';
 
 // ---------------------------------------------------------------------------
 // BE-203 acceptance gate 1: reorder OCC error code carries 409 (STALE_QUEUE).
@@ -224,5 +225,77 @@ import { AppError } from '../src/common/errors/AppError.js';
   assert.equal(capturedWhere, null, 'Under 3 chars must not query database');
 }
 
+// ---------------------------------------------------------------------------
+// P1-3: Secretary B unflags Secretary A's emergency flag -> succeeds, audit correct.
+// ---------------------------------------------------------------------------
+{
+  const entry: Record<string, unknown> = {
+    id: 'entry-1',
+    shiftId: 'shift-1',
+    patientId: 'patient-1',
+    status: 'WAITING',
+    position: 1,
+    isEmergency: true,
+    emergencyFlaggedAt: new Date(Date.now() - 3600 * 1000), // Flagged 1 hour ago (past old 120s grace window)
+    emergencyFlaggedByUserId: 'sec-a', // Flagged by Secretary A
+    emergencyReasonCode: 'DOCTOR_DIRECTED',
+    checkedInAt: new Date(Date.now() - 3600 * 1000),
+    calledAt: null,
+    skippedAt: null,
+    completedAt: null,
+    noShowAt: null,
+    abandonAt: null,
+    debtAckAt: null,
+    undoWindowUntil: null,
+    patient: { fullName: 'مريض تجريبي' },
+  };
+
+  const writtenAudits: Array<Record<string, unknown>> = [];
+
+  const txMock = {
+    $queryRaw: async () => [],
+    queueEntry: {
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        Object.assign(entry, args.data);
+        return entry;
+      },
+      findMany: async () => [entry],
+      findUnique: async () => entry,
+    },
+    auditEvent: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        writtenAudits.push(args.data);
+        return { id: 'aud-1' };
+      },
+    },
+    shift: {
+      update: async () => ({ id: 'shift-1', queueVersion: 2 }),
+      findUnique: async () => ({ id: 'shift-1', queueVersion: 2 }),
+    },
+  };
+
+  const mockDb = {
+    shift: {
+      findFirst: async () => ({ id: 'shift-1', queueVersion: 1, status: 'OPEN' }),
+    },
+    queueEntry: {
+      findUnique: async () => entry,
+      findMany: async () => [],
+    },
+    $transaction: async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
+  } as unknown as PrismaClient;
+
+  // Secretary B (sec-b) unflags Secretary A's (sec-a) emergency flag after grace period
+  const actorSecB = { userId: 'sec-b', role: 'SECRETARY' as const };
+  const res = await toggleEmergency('entry-1', { isEmergency: false }, actorSecB, mockDb);
+
+  assert.equal(res.isEmergency, false, 'Entry must be unflagged');
+  assert.equal(entry.isEmergency, false);
+  assert.equal(writtenAudits.length, 1);
+  assert.equal(writtenAudits[0].action, 'EMERGENCY_UNFLAG');
+  assert.equal(writtenAudits[0].actorUserId, 'sec-b');
+  assert.equal(writtenAudits[0].actorRole, 'SECRETARY');
+}
+
 // eslint-disable-next-line no-console
-console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search normalization tests passed.');
+console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search + P1-3 unflag tests passed.');

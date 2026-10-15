@@ -131,10 +131,8 @@ async function ensureCompletionInvoice(
 }
 
 /**
- * BE-203 emergency unflag grace window (seconds). A SECRETARY may only unflag
- * THEIR OWN emergency flag within this window; the DOCTOR may unflag any time.
+ * P1-3: Emergency unflag restrictions removed. Any secretary or doctor can unflag any emergency flag at any time.
  */
-const EMERGENCY_UNFLAG_GRACE_SEC = 120;
 
 /**
  * BE-202 Live Smart Queue Engine & State Machine.
@@ -1120,8 +1118,8 @@ export async function reorderQueue(
 // ---------------------------------------------------------------------------
 // BE-203 POST /api/v1/queue/:entryId/emergency  [BOTH]  -> 200 SecretSafe<QueueEntryDto>
 // Flag floats the entry to the top emergency block (sorted by flaggedAt ASC).
-// Unflag re-inserts among regular WAITING by checkedInAt. DOCTOR unflags any
-// time; SECRETARY only their OWN flag within the grace window (else 403).
+// Unflag re-inserts among regular WAITING by checkedInAt. Any role (DOCTOR or
+// SECRETARY) may unflag at any time per P1-3.
 // ---------------------------------------------------------------------------
 export async function toggleEmergency(
   entryId: string,
@@ -1189,15 +1187,7 @@ export async function toggleEmergency(
   if (!entry.isEmergency) {
     throw new AppError('ILLEGAL_TRANSITION', 'Entry is not currently flagged as emergency');
   }
-  if (actor.role === 'SECRETARY') {
-    const isOwn = entry.emergencyFlaggedByUserId !== null && entry.emergencyFlaggedByUserId === actor.userId;
-    const withinGrace =
-      entry.emergencyFlaggedAt !== null &&
-      now.getTime() - entry.emergencyFlaggedAt.getTime() <= EMERGENCY_UNFLAG_GRACE_SEC * 1000;
-    if (!isOwn || !withinGrace) {
-      throw new AppError('FORBIDDEN', 'Secretary may only unflag their own emergency flag within the grace window');
-    }
-  }
+  // P1-3: Any secretary can unflag any emergency flag at any time. Grace window and ownership check removed.
 
   const result = await runQueueTx(db, async (tx) => {
     await tx.queueEntry.update({
