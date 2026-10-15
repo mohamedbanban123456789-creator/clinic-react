@@ -127,28 +127,26 @@ import { AppError } from '../src/common/errors/AppError.js';
 }
 
 // ---------------------------------------------------------------------------
-// DB-09 secretary discount floor — tighter of absolute + pct wins; DOCTOR bypass.
+// P1-1: Secretary discount ceiling removed — ANY discount allowed with mandatory reason.
+// DOCTOR still bypasses the floor entirely.
 // ---------------------------------------------------------------------------
 {
   const fees = { standardFeeMinor: 100000, secretaryMaxDiscountMinor: 5000, secretaryMaxDiscountPct: 10 };
 
   assert.doesNotThrow(() => assertSecretaryDiscountFloor('SECRETARY', 100000, 100000, fees), 'no discount allowed');
   assert.doesNotThrow(() => assertSecretaryDiscountFloor('SECRETARY', 100000, 110000, fees), 'upcharge allowed');
-  // discount == min(max=5000, pctCap=10000) == 5000 -> allowed (boundary)
-  assert.doesNotThrow(() => assertSecretaryDiscountFloor('SECRETARY', 100000, 95000, fees), 'discount at cap allowed');
-  // discount 6000 > allowed 5000 -> FLOOR_VIOLATION (403, API-08)
-  assert.throws(
+  assert.doesNotThrow(() => assertSecretaryDiscountFloor('SECRETARY', 100000, 95000, fees), 'discount at previous cap allowed');
+  // P1-1: discount 6000 over previous cap 5000 now allowed for secretary
+  assert.doesNotThrow(
     () => assertSecretaryDiscountFloor('SECRETARY', 100000, 94000, fees),
-    (err: unknown) => err instanceof AppError && err.code === 'FLOOR_VIOLATION' && err.statusCode === 403,
-    'discount over cap must be FLOOR_VIOLATION',
+    'discount over previous cap is allowed under P1-1',
   );
 
-  // tighter PCT cap wins when pctCap < absolute max
+  // Large discount (e.g. 500 EGP fee discounted by 200 EGP -> 300 EGP) allowed for secretary
   const pctTight = { standardFeeMinor: 100000, secretaryMaxDiscountMinor: 20000, secretaryMaxDiscountPct: 5 };
-  assert.throws(
-    () => assertSecretaryDiscountFloor('SECRETARY', 100000, 94000, pctTight),
-    (err: unknown) => err instanceof AppError && err.code === 'FLOOR_VIOLATION',
-    'pct cap must tighten the floor',
+  assert.doesNotThrow(
+    () => assertSecretaryDiscountFloor('SECRETARY', 100000, 30000, pctTight),
+    'large discount allowed for secretary under P1-1',
   );
   assert.doesNotThrow(() => assertSecretaryDiscountFloor('SECRETARY', 100000, 95000, pctTight), 'within pct cap allowed');
 

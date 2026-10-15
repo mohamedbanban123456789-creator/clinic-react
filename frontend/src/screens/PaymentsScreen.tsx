@@ -234,15 +234,6 @@ export default function PaymentsScreen() {
   const total = Math.max(0, fee - discount)
   const remaining = Math.max(0, total - paid)
   const standard = minorToMajor(settingsQuery.data?.standardFeeMinor ?? 0)
-  const floorMinor = isDoctor
-    ? Infinity
-    : Math.min(
-        settingsQuery.data?.secretaryMaxDiscountMinor ?? 0,
-        Math.floor(((settingsQuery.data?.standardFeeMinor ?? 0) *
-          (settingsQuery.data?.secretaryMaxDiscountPct ?? 0)) / 100),
-      )
-  const floor = minorToMajor(floorMinor === Infinity ? Number.MAX_SAFE_INTEGER : floorMinor)
-  const discountExceedsFloor = !isDoctor && discount > floor
   const discountReasonRequired = discount > 0 && discountReason.trim().length < 10
   const outstanding = balanceQuery.data?.outstandingMinor ?? 0
 
@@ -352,9 +343,7 @@ export default function PaymentsScreen() {
                   <i>ج.م.</i>
                 </label>
                 <label className="field money-field">
-                  <span>
-                    الخصم {!isDoctor && floor < Number.MAX_SAFE_INTEGER ? `(حدك ${arNum(floor)} ج.م.)` : ""}
-                  </span>
+                  <span>الخصم</span>
                   <input
                     type="number"
                     value={discount}
@@ -375,11 +364,6 @@ export default function PaymentsScreen() {
                   />
                   <small>مطلوب عند تخفيض قيمة الكشف الافتراضية (١٠ أحرف على الأقل).</small>
                 </label>
-              )}
-              {discountExceedsFloor && (
-                <p className="field-error">
-                  الخصم يتجاوز الحد المسموح لمسؤولة الاستقبال — اطلب من الطبيب إجراء التعديل.
-                </p>
               )}
             </div>
             <div className="form-section">
@@ -452,7 +436,6 @@ export default function PaymentsScreen() {
               onClick={() => checkoutMutation.mutate()}
               disabled={
                 checkoutMutation.isPending ||
-                discountExceedsFloor ||
                 discountReasonRequired ||
                 paid < 0 ||
                 paid > total
