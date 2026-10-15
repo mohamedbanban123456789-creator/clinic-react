@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { useAuth } from "@/auth/AuthContext"
 import { useQueue, useQueueInvalidation } from "@/hooks/useQueue"
 import { queueApi } from "@/api/queue"
 import { supervisionApi, settingsApi } from "@/api/admin"
@@ -18,6 +19,8 @@ import { FloatingChat } from "@/components/Conversation"
 import { arNum, arTimer } from "@/lib/format"
 
 export default function DoctorDashboard() {
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
   const navigate = useNavigate()
   const { notify } = useToast()
   const { entries, isLoading, queueVersion } = useQueue()
@@ -34,6 +37,7 @@ export default function DoctorDashboard() {
   const unsignedQuery = useQuery({
     queryKey: ["supervision", "unsigned-notes"],
     queryFn: () => supervisionApi.unsignedNotes(),
+    enabled: isDoctor,
     refetchInterval: 120_000,
   })
 

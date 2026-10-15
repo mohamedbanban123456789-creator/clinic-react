@@ -121,8 +121,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       // Access token expired server-side: refresh then reconnect.
       socket.on("session.expired", () => {
         void tryRefresh().then((ok) => {
-          if (ok && socket.connected) {
-            socket.emit("auth.refresh", { token: getAccessToken() })
+          if (ok) {
+            socket.auth = { token: getAccessToken() }
+            if (socket.connected) {
+              socket.emit("auth.refresh", { token: getAccessToken() })
+            } else {
+              socket.connect()
+            }
           }
         })
       })

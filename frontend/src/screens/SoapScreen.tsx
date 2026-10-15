@@ -17,6 +17,7 @@ import { supervisionApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, Modal, useToast, SkeletonBlock } from "@/components/ui"
 import { arDate, arNum, arAgo } from "@/lib/format"
+import { useAuth } from "@/auth/AuthContext"
 import { addendumReasonOptions } from "@/lib/constants"
 
 const sectionTitles: Record<string, string> = {
@@ -27,6 +28,8 @@ const sectionTitles: Record<string, string> = {
 }
 
 export default function SoapScreen() {
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
   const { notify } = useToast()
@@ -55,7 +58,7 @@ export default function SoapScreen() {
   const unsignedQuery = useQuery({
     queryKey: ["supervision", "unsigned-notes"],
     queryFn: () => supervisionApi.unsignedNotes(),
-    enabled: !encounterParam,
+    enabled: Boolean(!encounterParam && isDoctor),
   })
 
   const encounter = encounterQuery.data

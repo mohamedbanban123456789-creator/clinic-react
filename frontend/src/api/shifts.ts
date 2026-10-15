@@ -1,6 +1,6 @@
 /** Shift endpoints — /api/v1/shifts */
 
-import { apiRequest } from "./client"
+import { apiRequest, ApiError } from "./client"
 import type {
   CloseShiftDto,
   CursorPage,
@@ -10,8 +10,13 @@ import type {
 } from "./types"
 
 export const shiftsApi = {
-  current(): Promise<ShiftViewDto> {
-    return apiRequest("/shifts/current")
+  current(): Promise<ShiftViewDto | null> {
+    return apiRequest<ShiftViewDto>("/shifts/current").catch((err) => {
+      if (err instanceof ApiError && err.status === 404) {
+        return null
+      }
+      throw err
+    })
   },
 
   get(shiftId: string): Promise<ShiftViewDto> {

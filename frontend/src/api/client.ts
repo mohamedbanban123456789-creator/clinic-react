@@ -142,6 +142,10 @@ export async function apiRequest<T>(
     }
   }
 
+  if (path.startsWith("/supervision") && role === "SECRETARY") {
+    throw new ApiError(403, "FORBIDDEN", "غير مصرح لحساب الاستقبال بالوصول للتقارير الإشرافية")
+  }
+
   const headers: Record<string, string> = {}
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`
@@ -166,7 +170,7 @@ export async function apiRequest<T>(
   }
 
   // Silent refresh + single retry on 401.
-  if (res.status === 401 && !options.skipRefresh && accessToken !== null) {
+  if (res.status === 401 && !options.skipRefresh) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       headers.Authorization = `Bearer ${accessToken}`

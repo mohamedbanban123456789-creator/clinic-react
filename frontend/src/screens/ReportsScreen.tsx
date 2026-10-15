@@ -17,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { useAuth } from "@/auth/AuthContext"
 import { supervisionApi, auditApi } from "@/api/admin"
 import { shiftsApi } from "@/api/shifts"
 import { apiErrorMessage } from "@/api/client"
@@ -29,6 +30,8 @@ const teal = "#0d9488"
 const blue = "#56a8e8"
 
 export default function ReportsScreen() {
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
   const { notify } = useToast()
   const [tab, setTab] = useState<"cash" | "shifts" | "exceptions" | "audit">("cash")
 
@@ -39,18 +42,22 @@ export default function ReportsScreen() {
   const shiftsHistoryQuery = useQuery({
     queryKey: ["supervision", "shifts"],
     queryFn: () => supervisionApi.shifts({ limit: 30 }),
+    enabled: isDoctor,
   })
   const exceptionsQuery = useQuery({
     queryKey: ["supervision", "exceptions"],
     queryFn: () => supervisionApi.exceptions(),
+    enabled: isDoctor,
   })
   const unsignedQuery = useQuery({
     queryKey: ["supervision", "unsigned-notes"],
     queryFn: () => supervisionApi.unsignedNotes(),
+    enabled: isDoctor,
   })
   const auditQuery = useQuery({
     queryKey: ["audit", "recent"],
     queryFn: () => auditApi.list({ limit: 100 }),
+    enabled: isDoctor,
   })
 
   // Cash summary for the most recent CLOSED shift.
@@ -61,12 +68,12 @@ export default function ReportsScreen() {
   const cashSummaryQuery = useQuery({
     queryKey: ["supervision", "cash-summary", latestClosed?.shiftId ?? "none"],
     queryFn: () => supervisionApi.cashSummary(latestClosed!.shiftId),
-    enabled: Boolean(latestClosed),
+    enabled: Boolean(isDoctor && latestClosed),
   })
   const discountsQuery = useQuery({
     queryKey: ["supervision", "discounts", latestClosed?.shiftId ?? "none"],
     queryFn: () => supervisionApi.discounts(latestClosed!.shiftId!),
-    enabled: Boolean(latestClosed),
+    enabled: Boolean(isDoctor && latestClosed),
   })
 
   const cash = cashSummaryQuery.data
