@@ -184,20 +184,41 @@ export async function patchEncounter(
 ): Promise<{ encounterId: string; status: string; rowVersion: number }> {
   const cur = await db.encounter.findUnique({ where: { id } });
   if (cur === null) throw new AppError('NOT_FOUND', 'Encounter not found');
-  if (cur.status === 'SIGNED') {
-    throw new AppError('ALREADY_SIGNED', 'Signed encounters are immutable; use addenda');
+  if (cur.status !== 'DRAFT' && cur.status !== 'SIGNED') {
+    throw new AppError('ILLEGAL_TRANSITION', 'Only DRAFT or SIGNED encounters can be modified');
   }
   if (cur.rowVersion !== ifMatchRowVersion) {
     throw new AppError('STALE_ROW_VERSION', 'Encounter was modified; refetch and retry', [
       { field: 'If-Match', issue: 'stale row version', expected: String(cur.rowVersion) },
     ]);
   }
-  // ATOMIC OCC (fixes check-then-act lost update): the UPDATE itself is guarded by
-  // `rowVersion = <If-Match> AND status = 'DRAFT'`. If a concurrent writer bumps the
-  // version or signs between the read above and this write, updateMany matches 0
-  // rows and we surface STALE_ROW_VERSION instead of silently overwriting.
+
+  const soap = toSoapDto({
+    soapSubjective: input.soap?.S !== undefined ? input.soap.S : cur.soapSubjective,
+    soapObjective: input.soap?.O !== undefined ? input.soap.O : cur.soapObjective,
+    soapAssessment: input.soap?.A !== undefined ? input.soap.A : cur.soapAssessment,
+    soapPlan: input.soap?.P !== undefined ? input.soap.P : cur.soapPlan,
+  });
+
+  let newHash: string | undefined = undefined;
+  if (cur.status === 'SIGNED' && isCompleteSoap(soap)) {
+    newHash = computeFinalHash({
+      encounterId: cur.id,
+      patientId: cur.patientId,
+      soap: { S: soap.S as string, O: soap.O as string, A: soap.A as string, P: soap.P as string },
+      mse: {
+        appearance: input.mse?.appearance ?? cur.mseAppearance,
+        behavior: input.mse?.behavior ?? cur.mseBehavior,
+        speechCoherence: input.mse?.speechCoherence ?? cur.mseSpeechCoherence,
+        moodAffect: input.mse?.moodAffect ?? cur.mseMoodAffect,
+      },
+      diagnoses: input.diagnoses ?? (Array.isArray(cur.diagnoses) ? (cur.diagnoses as string[]) : []),
+    });
+  }
+
+  // ATOMIC OCC: guarded by `rowVersion = <If-Match> AND status IN ('DRAFT', 'SIGNED')`.
   const patched = await db.encounter.updateMany({
-    where: { id, rowVersion: ifMatchRowVersion, status: 'DRAFT' },
+    where: { id, rowVersion: ifMatchRowVersion, status: { in: ['DRAFT', 'SIGNED'] } },
     data: {
       ...(input.visitDate !== undefined ? { visitDate: new Date(input.visitDate) } : {}),
       ...(input.encounterType !== undefined ? { encounterType: input.encounterType } : {}),
@@ -210,6 +231,7 @@ export async function patchEncounter(
       ...(input.mse?.speechCoherence !== undefined ? { mseSpeechCoherence: input.mse.speechCoherence } : {}),
       ...(input.mse?.moodAffect !== undefined ? { mseMoodAffect: input.mse.moodAffect } : {}),
       ...(input.diagnoses !== undefined ? { diagnoses: input.diagnoses } : {}),
+      ...(newHash !== undefined ? { finalContentHash: newHash } : {}),
       rowVersion: { increment: 1 },
     },
   });
@@ -229,8 +251,9 @@ export async function patchEncounter(
     entityType: 'Encounter',
     entityId: id,
     requestId: randomUUID(),
-    beforeState: { rowVersion: ifMatchRowVersion },
-    afterState: { rowVersion: updated.rowVersion, status: updated.status },
+    reasonText: cur.status === 'SIGNED' ? 'تعديل تقرير موقع' : 'تعديل مسودة تقرير',
+    beforeState: { rowVersion: ifMatchRowVersion, status: cur.status },
+    afterState: { rowVersion: updated.rowVersion, status: updated.status, isSignedEdit: cur.status === 'SIGNED' },
   });
   return { encounterId: updated.id, status: updated.status, rowVersion: updated.rowVersion };
 }

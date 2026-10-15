@@ -86,8 +86,8 @@ export default function SoapScreen() {
       ehrApi.patchEncounter(encounter!.encounterId, encounter!.rowVersion, {
         soap: draftSoap ?? undefined,
       }),
-    onSuccess: (res) => {
-      notify("تم حفظ المسودة")
+    onSuccess: () => {
+      notify(isSigned ? "تم حفظ التعديلات على التقرير" : "تم حفظ المسودة")
       setEditing(false)
       setDraftSoap(null)
       void queryClient.invalidateQueries({ queryKey: ["encounter"] })
@@ -308,9 +308,40 @@ export default function SoapScreen() {
             </>
           )}
           {isSigned && (
-            <AppButton variant="outline" icon="plus" onClick={() => setShowAddendum(true)}>
-              إضافة ملحق
-            </AppButton>
+            <>
+              <AppButton
+                variant="outline"
+                onClick={() => {
+                  if (editing) {
+                    setEditing(false)
+                    setDraftSoap(null)
+                  } else {
+                    setDraftSoap({
+                      S: encounter.soap?.S ?? "",
+                      O: encounter.soap?.O ?? "",
+                      A: encounter.soap?.A ?? "",
+                      P: encounter.soap?.P ?? "",
+                    })
+                    setEditing(true)
+                  }
+                }}
+              >
+                {editing ? "إلغاء التعديل" : "تعديل التقرير"}
+              </AppButton>
+              {editing && (
+                <AppButton
+                  variant="secondary"
+                  icon="check"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending}
+                >
+                  {saveMutation.isPending ? "جارٍ الحفظ..." : "حفظ التعديلات"}
+                </AppButton>
+              )}
+              <AppButton variant="outline" icon="plus" onClick={() => setShowAddendum(true)}>
+                إضافة ملحق
+              </AppButton>
+            </>
           )}
         </div>
       </section>

@@ -12,6 +12,7 @@ import { AppError } from '../src/common/errors/AppError.js';
 import { toSecretInvoiceDto, toInvoiceRow } from '../src/modules/cashier-shift/billing.dto.js';
 import { isSecretSafe } from '../src/common/types/secretSafe.js';
 import { writeOffSchema } from '../src/modules/cashier-shift/billing.validators.js';
+import { patchEncounter, addEncounterAddendum } from '../src/modules/clinical-ehr/encounter.service.js';
 
 // ---------------------------------------------------------------------------
 // In-memory Prisma stand-in. Every service under test is pure given `db`, so
@@ -38,21 +39,46 @@ interface InvoiceRow {
   createdByUserId: string;
 }
 
+interface EncounterRow {
+  id: string;
+  patientId: string;
+  status: string;
+  rowVersion: number;
+  visitDate: Date;
+  encounterType: string;
+  soapSubjective: string | null;
+  soapObjective: string | null;
+  soapAssessment: string | null;
+  soapPlan: string | null;
+  mseAppearance: string;
+  mseBehavior: string;
+  mseSpeechCoherence: string;
+  mseMoodAffect: string;
+  diagnoses: string[];
+  finalContentHash: string | null;
+  addendumCount: number;
+  signedAt: Date | null;
+  signedByUserId: string | null;
+}
+
 function makeDb(options: {
   invoices?: InvoiceRow[];
   patients?: Array<{ id: string; outstandingBalanceMinor: number }>;
   audits?: Array<Record<string, unknown>>;
   settingsRow?: Record<string, unknown> | null;
+  encounters?: EncounterRow[];
 } = {}): {
   db: PrismaClient;
   invoices: InvoiceRow[];
   patients: Array<{ id: string; outstandingBalanceMinor: number }>;
   audits: Array<Record<string, unknown>>;
+  encounters: EncounterRow[];
 } {
   const invoices = options.invoices ?? [];
   const patients = options.patients ?? [{ id: 'p1', outstandingBalanceMinor: 0 }];
   const audits = options.audits ?? [];
   const settingsRow = options.settingsRow;
+  const encounters = options.encounters ?? [];
 
   const byId = (id: string): InvoiceRow | undefined => invoices.find((i) => i.id === id);
 
@@ -229,9 +255,56 @@ function makeDb(options: {
         return { ...base, ...args.update };
       },
     },
+    encounter: {
+      findUnique: async (args: { where: { id: string } }): Promise<EncounterRow | null> => {
+        return encounters.find((e) => e.id === args.where.id) ?? null;
+      },
+      findUniqueOrThrow: async (args: { where: { id: string } }): Promise<EncounterRow> => {
+        const e = encounters.find((x) => x.id === args.where.id);
+        if (!e) throw new Error('P2025');
+        return e;
+      },
+      updateMany: async (args: {
+        where: { id: string; rowVersion?: number; status?: string | { in: string[] } };
+        data: Record<string, unknown>;
+      }): Promise<{ count: number }> => {
+        const e = encounters.find((x) => x.id === args.where.id);
+        if (!e) return { count: 0 };
+        if (args.where.rowVersion !== undefined && e.rowVersion !== args.where.rowVersion) return { count: 0 };
+        if (args.where.status !== undefined) {
+          if (typeof args.where.status === 'string' && e.status !== args.where.status) return { count: 0 };
+          if (typeof args.where.status === 'object' && 'in' in args.where.status && !args.where.status.in.includes(e.status)) return { count: 0 };
+        }
+        if (args.data.rowVersion && typeof args.data.rowVersion === 'object' && 'increment' in (args.data.rowVersion as object)) {
+          e.rowVersion += 1;
+        }
+        if (args.data.status && typeof args.data.status === 'string') e.status = args.data.status;
+        if (args.data.soapSubjective !== undefined) e.soapSubjective = args.data.soapSubjective as string;
+        if (args.data.soapObjective !== undefined) e.soapObjective = args.data.soapObjective as string;
+        if (args.data.soapAssessment !== undefined) e.soapAssessment = args.data.soapAssessment as string;
+        if (args.data.soapPlan !== undefined) e.soapPlan = args.data.soapPlan as string;
+        if (args.data.finalContentHash !== undefined) e.finalContentHash = args.data.finalContentHash as string;
+        return { count: 1 };
+      },
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }): Promise<EncounterRow> => {
+        const e = encounters.find((x) => x.id === args.where.id);
+        if (!e) throw new Error('P2025');
+        if (args.data.addendumCount && typeof args.data.addendumCount === 'object' && 'increment' in (args.data.addendumCount as object)) {
+          e.addendumCount += 1;
+        }
+        return e;
+      },
+    },
+    encounterAddendum: {
+      create: async (args: { data: Record<string, unknown> }): Promise<Record<string, unknown>> => ({
+        id: 'add-1',
+        ...args.data,
+        createdAt: new Date(),
+      }),
+    },
   };
 
-  return { db: db as unknown as PrismaClient, invoices, patients, audits };
+  return { db: db as unknown as PrismaClient, invoices, patients, audits, encounters };
 }
 
 function baseInvoice(overrides: Partial<InvoiceRow> = {}): InvoiceRow {
@@ -608,5 +681,88 @@ function mockSettingsReq(role: 'DOCTOR' | 'SECRETARY'): Request {
   assert.equal(feed.totalEvents, 3);
 }
 
+// ===========================================================================
+// P1-4 — Signed SOAP becomes editable with audit logging & hash recalculation
+// ===========================================================================
+{
+  const initialEncounter: EncounterRow = {
+    id: 'enc-signed-1',
+    patientId: 'p1',
+    status: 'SIGNED',
+    rowVersion: 1,
+    visitDate: new Date('2026-01-01'),
+    encounterType: 'CONSULTATION',
+    soapSubjective: 'Original subjective',
+    soapObjective: 'Original objective',
+    soapAssessment: 'Original assessment',
+    soapPlan: 'Original plan',
+    mseAppearance: 'APPROPRIATE',
+    mseBehavior: 'CALM',
+    mseSpeechCoherence: 'COHERENT',
+    mseMoodAffect: 'EUTHYMIC',
+    diagnoses: ['F32.0'],
+    finalContentHash: 'initial-hash-value',
+    addendumCount: 0,
+    signedAt: new Date('2026-01-01T10:00:00Z'),
+    signedByUserId: 'u-doc',
+  };
+
+  const { db, audits } = makeDb({ encounters: [initialEncounter] });
+
+  // 1. Doctor edits signed encounter freely
+  const patchResult = await patchEncounter(
+    'enc-signed-1',
+    {
+      soap: {
+        S: 'Updated subjective after patient clarification',
+      },
+    },
+    1,
+    { userId: 'u-doc', role: 'DOCTOR' },
+    db,
+  );
+
+  assert.equal(patchResult.status, 'SIGNED', 'Status remains SIGNED after edit');
+  assert.equal(patchResult.rowVersion, 2, 'RowVersion incremented');
+  assert.equal(initialEncounter.soapSubjective, 'Updated subjective after patient clarification');
+  assert.notEqual(initialEncounter.finalContentHash, 'initial-hash-value', 'Hash was recomputed on signed edit');
+
+  // 2. Audit event recorded for signed edit
+  const editAudit = audits.find((a) => a.action === 'ENCOUNTER_UPDATE');
+  assert.ok(editAudit, 'ENCOUNTER_UPDATE audit event written');
+  assert.equal(editAudit.actorUserId, 'u-doc');
+  assert.equal(editAudit.reasonText, 'تعديل تقرير موقع');
+  assert.equal((editAudit.afterState as Record<string, unknown>).isSignedEdit, true);
+
+  // 3. Stale row version fails OCC
+  await assert.rejects(
+    () =>
+      patchEncounter(
+        'enc-signed-1',
+        { soap: { P: 'New plan' } },
+        1, // stale row version (now 2)
+        { userId: 'u-doc', role: 'DOCTOR' },
+        db,
+      ),
+    (err: unknown) => err instanceof AppError && err.code === 'STALE_ROW_VERSION',
+    'Stale row version is rejected with STALE_ROW_VERSION',
+  );
+
+  // 4. Addenda remain fully available on signed encounters
+  const addendumResult = await addEncounterAddendum(
+    'enc-signed-1',
+    {
+      note: 'Lab results reviewed: normal thyroid panel',
+      idempotencyKey: 'idemp-add-1',
+    },
+    { userId: 'u-doc', role: 'DOCTOR' },
+    db,
+  );
+
+  assert.equal(addendumResult.encounterId, 'enc-signed-1');
+  assert.equal(addendumResult.version, 1);
+  assert.equal(initialEncounter.addendumCount, 1, 'Addendum count incremented');
+}
+
 // eslint-disable-next-line no-console
-console.log('BE-remediation endpoint suites (write-off/balance/audit/settings/guards) passed.');
+console.log('BE-remediation endpoint suites (write-off/balance/audit/settings/guards/P1-4-signed-soap) passed.');
