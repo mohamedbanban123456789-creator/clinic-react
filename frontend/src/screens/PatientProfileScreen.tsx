@@ -449,7 +449,7 @@ export default function PatientProfileScreen() {
               )}
               {invoices.map((inv) => (
                 <div className="data-row" key={inv.invoiceId} style={{ cursor: "default" }}>
-                  <strong>{inv.invoiceId.slice(-8).toUpperCase()}</strong>
+                  <strong>{inv.invoiceId.slice(-6).toUpperCase()}</strong>
                   <span>{arDate(inv.createdAt)}</span>
                   <span>{moneyMinor(inv.finalFeeMinor)}</span>
                   <span>{moneyMinor(inv.collectedMinor)}</span>

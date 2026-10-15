@@ -37,7 +37,7 @@ function ReceiptModal({
   return (
     <Modal
       title="تفاصيل الإيصال"
-      subtitle={`مرجع ${checkout.receiptId?.slice(-8).toUpperCase() ?? ""}`}
+      subtitle={`مرجع ${checkout.receiptId?.slice(-6).toUpperCase() ?? ""}`}
       onClose={onClose}
     >
       <div className="receipt-paper">

@@ -247,7 +247,7 @@ export default function ReportsScreen() {
                     </div>
                     {(discountsQuery.data?.data ?? []).map((d) => (
                       <div className="data-row" key={d.invoiceId} style={{ cursor: "default" }}>
-                        <strong>{d.invoiceId.slice(-8).toUpperCase()}</strong>
+                        <strong>{d.invoiceId.slice(-6).toUpperCase()}</strong>
                         <span>{moneyMinor(d.standardFeeMinor)}</span>
                         <span>{moneyMinor(d.finalFeeMinor)}</span>
                         <span className="due-text">{moneyMinor(d.discountMinor)}</span>
