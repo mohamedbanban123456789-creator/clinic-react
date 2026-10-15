@@ -131,9 +131,12 @@ export const doctorTemplates = [
     type: "DOCTOR_COMPLIMENTARY" as IntercomType,
   },
   { label: "رتبي موعد متابعة", type: "DOCTOR_FOLLOWUP" as IntercomType },
+  { label: "السعر النهائي معتمد بدون خصم", type: "CUSTOM_TEXT" as IntercomType },
+  { label: "السعر النهائي بعد الخصم: ", type: "CUSTOM_TEXT" as IntercomType },
 ]
 
 export const secretaryTemplates = [
+  { label: "يرجى تحديد السعر النهائي بعد أي خصم", type: "CUSTOM_TEXT" as IntercomType },
   { label: "يوجد ضوضاء في صالة الانتظار", type: "SEC_DISRUPTION" as IntercomType },
   {
     label: "هناك اتصال من صيدلية",

@@ -6,11 +6,12 @@
  * administrative shortcut into the clinic-operations area.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { Icon, type IconName } from "@/components/ui"
+import { Icon, type IconName, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
 import { arToday } from "@/lib/format"
+import { onIntercom } from "@/realtime/socket"
 
 interface NavItem {
   to: string
@@ -217,6 +218,19 @@ export function Header({ title }: { title: string }) {
 }
 
 export function AppShell({ title, children }: { title: string; children: React.ReactNode }) {
+  const { notify } = useToast()
+  const { user } = useAuth()
+
+  useEffect(() => {
+    return onIntercom((msg) => {
+      if (msg.fromUserId !== user?.id) {
+        const sender = msg.fromRole === "DOCTOR" ? "الطبيب/ة" : "الاستقبال"
+        const snippet = msg.text ? (msg.text.length > 50 ? `${msg.text.slice(0, 50)}…` : msg.text) : "إشعار جديد"
+        notify(`رسالة من ${sender}: ${snippet}`)
+      }
+    })
+  }, [user?.id, notify])
+
   return (
     <div className="app" dir="rtl">
       <Sidebar />

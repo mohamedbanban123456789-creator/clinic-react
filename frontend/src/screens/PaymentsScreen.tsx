@@ -23,15 +23,18 @@ import { arNum, arDate, moneyMinor, minorToMajor } from "@/lib/format"
 import { paymentMethods } from "@/lib/constants"
 import type { CheckoutDto, InvoiceListItemDto, PatientDto } from "@/api/types"
 import { useAuth } from "@/auth/AuthContext"
+import { Conversation } from "@/components/Conversation"
 
 function ReceiptModal({
   checkout,
   patient,
   onClose,
+  onOpenChat,
 }: {
   checkout: CheckoutDto
   patient: PatientDto | null
   onClose: () => void
+  onOpenChat?: () => void
 }) {
   const paidFull = checkout.outstandingMinor === 0
   return (
@@ -102,6 +105,11 @@ function ReceiptModal({
         <AppButton variant="outline" onClick={onClose}>
           إغلاق
         </AppButton>
+        {onOpenChat && (
+          <AppButton variant="secondary" icon="message" onClick={onOpenChat}>
+            مراجعة السعر في المحادثة
+          </AppButton>
+        )}
         <AppButton icon="receipt" onClick={() => window.print()}>
           طباعة الإيصال
         </AppButton>
@@ -152,6 +160,7 @@ export default function PaymentsScreen() {
   const [paid, setPaid] = useState(0)
   const [method, setMethod] = useState<string>("cash")
   const [receipt, setReceipt] = useState<CheckoutDto | null>(null)
+  const [showReviewChat, setShowReviewChat] = useState(false)
   const [showSettle, setShowSettle] = useState(false)
   const [settleAmount, setSettleAmount] = useState(0)
 
@@ -208,7 +217,8 @@ export default function PaymentsScreen() {
     },
     onSuccess: (checkout) => {
       setReceipt(checkout)
-      notify("تم تسجيل الدفعة وإنشاء الإيصال")
+      setShowReviewChat(true)
+      notify("تم تسجيل الدفعة وإنشاء الإيصال — جرى فتح محادثة مراجعة السعر مع الطبيب")
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["queue"] })
     },
@@ -461,6 +471,7 @@ export default function PaymentsScreen() {
           checkout={receipt}
           patient={patientQuery.data ?? null}
           onClose={() => setReceipt(null)}
+          onOpenChat={() => setShowReviewChat(true)}
         />
       )}
 
@@ -500,6 +511,21 @@ export default function PaymentsScreen() {
               </AppButton>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {showReviewChat && (
+        <Modal
+          title="مراجعة السعر مع الطبيب"
+          subtitle="محادثة مراجعة السعر النهائي بعد الخصم (للتوثيق الداخلي فقط)"
+          onClose={() => setShowReviewChat(false)}
+        >
+          <Conversation expanded onComplimentary={() => {}} />
+          <div className="modal-actions" style={{ marginTop: "12px" }}>
+            <AppButton variant="secondary" onClick={() => setShowReviewChat(false)}>
+              إغلاق المحادثة
+            </AppButton>
+          </div>
         </Modal>
       )}
     </div>
