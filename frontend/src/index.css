@@ -132,6 +132,7 @@ select { border: 1px solid var(--border); color: var(--text); background: white;
 .patient-cell > span:nth-child(2) { min-width: 0; }
 .patient-cell strong { font-size: 10px; display: block; white-space: nowrap; }
 .patient-cell small { color: var(--muted); display: block; font-size: 8px; direction: ltr; text-align: right; }
+.phone-display { direction: ltr; text-align: right; display: inline-block; unicode-bidi: embed; }
 .patient-avatar { width: 33px; height: 33px; font-size: 11px; }
 .patient-avatar.large { width: 45px; height: 45px; font-size: 16px; }
 .patient-avatar.xl { width: 65px; height: 65px; font-size: 22px; }

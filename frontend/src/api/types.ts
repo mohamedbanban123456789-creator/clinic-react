@@ -95,6 +95,7 @@ export interface PatientSearchCandidateDto {
   id: string
   fullName: string
   dateOfBirth: string
+  phone: string | null
   phoneLast4: string | null
   nationalIdLast4: string | null
   lastVisitAt: string | null

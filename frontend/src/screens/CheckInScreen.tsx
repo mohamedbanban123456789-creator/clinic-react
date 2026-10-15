@@ -13,7 +13,7 @@ import { queueApi } from "@/api/queue"
 import { settingsApi } from "@/api/admin"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, useToast } from "@/components/ui"
-import { arAgo, arNum, arTime, ageFromDob, moneyMinor } from "@/lib/format"
+import { arAgo, arNum, arTime, ageFromDob, moneyMinor, formatPhone } from "@/lib/format"
 import type { PatientDto, PatientSearchCandidateDto } from "@/api/types"
 
 function NewPatientModal({
@@ -311,6 +311,9 @@ export default function CheckInScreen() {
                       {ageFromDob(candidate.dateOfBirth) !== null
                         ? `${arNum(ageFromDob(candidate.dateOfBirth) as number)} سنة`
                         : "العمر غير مسجل"}
+                      {candidate.phone || candidate.phoneLast4 ? (
+                        <> · <span className="phone-display">{formatPhone(candidate.phone, candidate.phoneLast4, "SECRETARY")}</span></>
+                      ) : null}
                     </p>
                   </div>
                   <span className="match-label">
@@ -351,8 +354,8 @@ export default function CheckInScreen() {
             </div>
             <div className="patient-meta">
               <span>
-                <small>رقم الهاتف (آخر ٤)</small>
-                <b>{selected.phoneLast4 ? `••• •${selected.phoneLast4}` : "غير مسجل"}</b>
+                <small>رقم الهاتف</small>
+                <b className="phone-display">{formatPhone(selected.phone, selected.phoneLast4, "SECRETARY")}</b>
               </span>
               <span>
                 <small>آخر زيارة</small>

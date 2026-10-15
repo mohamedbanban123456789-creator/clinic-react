@@ -147,3 +147,27 @@ export const normalizeName = (raw: string): string => {
   return kept.replace(/\s+/g, " ").trim()
 }
 
+/**
+ * Role-aware phone number formatting (Owner decision D2):
+ * - SECRETARY: FULL phone number, right-aligned
+ * - DOCTOR: LAST 4 digits only, right-aligned
+ */
+export const formatPhone = (
+  phone: string | null | undefined,
+  phoneLast4?: string | null | undefined,
+  role?: "DOCTOR" | "SECRETARY",
+): string => {
+  if (role === "DOCTOR") {
+    const l4 = phoneLast4 ?? (phone ? phone.trim().slice(-4) : null)
+    return l4 ? `•••• •${l4}` : "—"
+  }
+  // Secretary sees full number
+  if (phone && phone.trim()) {
+    return phone.trim()
+  }
+  if (phoneLast4) {
+    return `•••• •${phoneLast4}`
+  }
+  return "—"
+}
+

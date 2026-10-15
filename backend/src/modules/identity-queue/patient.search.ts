@@ -51,6 +51,7 @@ export async function searchPatients(
             id: true,
             fullName: true,
             dateOfBirth: true,
+            phone: true,
             phoneNorm: true,
             nationalIdNorm: true,
             outstandingBalanceMinor: true,

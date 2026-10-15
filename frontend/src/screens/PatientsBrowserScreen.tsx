@@ -7,7 +7,7 @@ import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { patientsApi } from "@/api/patients"
-import { arAgo, arNum, ageFromDob } from "@/lib/format"
+import { arAgo, arNum, ageFromDob, formatPhone } from "@/lib/format"
 import { Icon } from "@/components/ui"
 import type { PatientSearchCandidateDto } from "@/api/types"
 
@@ -84,6 +84,9 @@ export default function PatientsBrowserScreen() {
                     ? `${arNum(ageFromDob(candidate.dateOfBirth) as number)} سنة`
                     : "—"}{" "}
                   · آخر زيارة: {candidate.lastVisitAt ? arAgo(candidate.lastVisitAt) : "أول زيارة"}
+                  {candidate.phoneLast4 ? (
+                    <> · هاتف: <span className="phone-display">{formatPhone(candidate.phone, candidate.phoneLast4, "DOCTOR")}</span></>
+                  ) : null}
                 </p>
               </div>
               <span className="match-label">

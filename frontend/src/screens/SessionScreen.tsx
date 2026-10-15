@@ -23,7 +23,7 @@ import type { ScribeEvidenceItem } from "@/api/types"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, useToast, SelectField } from "@/components/ui"
 import { useQueue } from "@/hooks/useQueue"
-import { arNum, arAgo, arTimer } from "@/lib/format"
+import { arNum, arAgo, arTimer, formatPhone } from "@/lib/format"
 import { mseFieldLabel, mseOptions } from "@/lib/constants"
 
 type RecorderState = "idle" | "recording" | "paused" | "processing" | "ready" | "error"
@@ -387,7 +387,7 @@ export default function SessionScreen() {
           </div>
           <div className="context-tags">
             <span>{current?.status === "IN_CONSULTATION" ? "مع الطبيب الآن" : "جلسة موثقة يدويًا"}</span>
-            <span>{patient?.phone ? `هاتف: ••• •${patient.phone.slice(-4)}` : "لا هاتف مسجل"}</span>
+            <span>{patient?.phone ? <>هاتف: <span className="phone-display">{formatPhone(patient.phone, null, "DOCTOR")}</span></> : "لا هاتف مسجل"}</span>
           </div>
           <AppButton
             variant="outline"

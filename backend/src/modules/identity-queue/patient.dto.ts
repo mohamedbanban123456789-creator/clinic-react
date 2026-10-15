@@ -25,6 +25,7 @@ export interface PatientSearchCandidateDto {
   readonly id: string;
   readonly fullName: string;
   readonly dateOfBirth: string;
+  readonly phone: string | null;
   readonly phoneLast4: string | null;
   readonly nationalIdLast4: string | null;
   readonly lastVisitAt: string | null;
@@ -58,6 +59,7 @@ interface SearchRowLike extends Pick<
   PatientRowLike,
   'id' | 'fullName' | 'dateOfBirth' | 'registrationStatus' | 'outstandingBalanceMinor' | 'lastVisitAt'
 > {
+  readonly phone?: string | null;
   readonly phoneNorm: string | null;
   readonly nationalIdNorm: string | null;
 }
@@ -83,12 +85,13 @@ export function toSecretPatientDto(row: PatientRowLike): SecretSafe<PatientDto> 
   });
 }
 
-/** Minimized search mapper: masked last-4 + debt flag, no address/emergency. */
+/** Minimized search mapper: full phone + masked last-4 + debt flag, no address/emergency. */
 export function toSecretPatientSearchDto(row: SearchRowLike): SecretSafe<PatientSearchCandidateDto> {
   return markSecretSafe<PatientSearchCandidateDto>({
     id: row.id,
     fullName: row.fullName,
     dateOfBirth: row.dateOfBirth.toISOString(),
+    phone: row.phone ?? (row.phoneNorm ? row.phoneNorm : null),
     phoneLast4: last4(row.phoneNorm),
     nationalIdLast4: last4(row.nationalIdNorm),
     lastVisitAt: row.lastVisitAt === null ? null : row.lastVisitAt.toISOString(),
