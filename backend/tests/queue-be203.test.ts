@@ -129,6 +129,16 @@ import { AppError } from '../src/common/errors/AppError.js';
     computeEstimatedWaitMin({ precedingWaitingCount: 0, avgConsultDurationMin: 20, inConsultation: true, elapsedConsultMin: -5 }),
     20,
   );
+
+  // Fractional elapsed consult minutes must round to an integer (P0-4 fix).
+  const fractionalResult = computeEstimatedWaitMin({
+    precedingWaitingCount: 0,
+    avgConsultDurationMin: 20,
+    inConsultation: true,
+    elapsedConsultMin: 5.465,
+  });
+  assert.equal(fractionalResult, 15, '20 - 5.465 = 14.535 must round to integer 15');
+  assert.equal(Number.isInteger(fractionalResult), true, 'Must be an integer');
 }
 
 // ---------------------------------------------------------------------------

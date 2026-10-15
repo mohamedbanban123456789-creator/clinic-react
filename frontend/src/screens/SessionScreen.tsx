@@ -590,7 +590,7 @@ export default function SessionScreen() {
                 <div>
                   <details>
                     <summary>
-                      <strong>التفريغ المنقح للجلسة (بالمتحدثين)</strong> — {analysis.transcript.segments.length} مقطع
+                      <strong>التفريغ المنقح للجلسة (بالمتحدثين)</strong> — {arNum(analysis.transcript.segments.length)} مقطع
                     </summary>
                     <div style={{ marginTop: "8px", maxHeight: "320px", overflowY: "auto" }}>
                       {analysis.transcript.segments.map((seg, i) => (

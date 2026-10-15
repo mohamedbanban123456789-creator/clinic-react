@@ -22,10 +22,11 @@ export interface QueueState {
 }
 
 function snapshotToQueueList(snapshot: QueueSnapshot): QueueListDto {
+  const waitingFirst = snapshot.entries.find((e) => e.status === "WAITING")
   return {
     shiftId: snapshot.clinicDayId,
     queueVersion: snapshot.queueVersion,
-    estimatedWaitMin: snapshot.entries.find((e) => e.status === "WAITING")?.estimatedWaitMin ?? 0,
+    estimatedWaitMin: waitingFirst ? Math.round(waitingFirst.estimatedWaitMin) : 0,
     entries: snapshot.entries.map((e) => ({
       entryId: e.entryId,
       patientId: e.patientId,
@@ -40,7 +41,7 @@ function snapshotToQueueList(snapshot: QueueSnapshot): QueueListDto {
       skippedAt: null,
       noShowAt: null,
       abandonAt: null,
-      estimatedWaitMin: e.estimatedWaitMin,
+      estimatedWaitMin: Math.round(e.estimatedWaitMin),
       debtAckAt: null,
       debtAlert: null,
       queueVersion: e.queueVersion,
@@ -56,7 +57,7 @@ export function useQueue(): QueueState {
   const rest = useQuery({
     queryKey: ["queue", "current"],
     queryFn: () => queueApi.list(),
-    refetchInterval: 60_000, // Safety net behind the socket.
+    refetchInterval: 30_000, // Safety net behind the socket.
   })
 
   useEffect(() => {
@@ -73,7 +74,9 @@ export function useQueue(): QueueState {
   useQueueSnapshot((snapshot) => {
     if (snapshot.queueVersion >= versionRef.current) {
       versionRef.current = snapshot.queueVersion
-      setLive(snapshotToQueueList(snapshot))
+      const mapped = snapshotToQueueList(snapshot)
+      setLive(mapped)
+      queryClient.setQueryData(["queue", "current"], mapped)
       // Invalidate financial/queue-dependent queries on queue changes.
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["shifts"] })

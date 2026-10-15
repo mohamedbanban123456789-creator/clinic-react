@@ -4,7 +4,7 @@
  */
 
 export const arNum = (value: number): string =>
-  new Intl.NumberFormat("ar-EG").format(value)
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(Math.round(value))
 
 /** Money label per design language: ج.م. (EGP). */
 export const money = (value: number): string => `${arNum(value)} ج.م.`

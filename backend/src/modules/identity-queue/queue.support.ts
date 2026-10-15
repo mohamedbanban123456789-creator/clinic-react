@@ -76,7 +76,7 @@ export async function loadOrderedWaitingPool(prisma: PrismaTx | PrismaClient, sh
 
 /** Estimated wait in minutes for a given dense position. */
 export function estimateWaitMin(position: number, avgConsultMin: number): number {
-  return Math.max(0, position - 1) * avgConsultMin;
+  return Math.round(Math.max(0, position - 1) * avgConsultMin);
 }
 
 /** Aggregate outstanding debt for a patient across UNPAID/PARTIAL invoices. */
@@ -234,6 +234,6 @@ export function computeEstimatedWaitMin(params: {
   const remainder = params.inConsultation
     ? Math.max(0, params.avgConsultDurationMin - Math.max(0, params.elapsedConsultMin))
     : 0;
-  return base + remainder;
+  return Math.round(base + remainder);
 }
 
