@@ -255,7 +255,7 @@ export default function CheckInScreen() {
           <span className="step-no">١</span>
           <div>
             <h2>ابحث عن مريض مسجل</h2>
-            <p>يمكنك البحث بالاسم أو رقم الهاتف أو الرقم القومي (٣ أحرف على الأقل).</p>
+            <p>يمكنك البحث بالاسم أو رقم الهاتف (٣ أحرف على الأقل).</p>
           </div>
         </div>
         <label className="large-search">

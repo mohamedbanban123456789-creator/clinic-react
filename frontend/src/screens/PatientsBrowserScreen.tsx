@@ -41,7 +41,7 @@ export default function PatientsBrowserScreen() {
           <span className="step-no">١</span>
           <div>
             <h2>ابحث في ملفات المرضى</h2>
-            <p>ابحث بالاسم أو رقم الهاتف أو الرقم القومي لفتح الملف الطبي.</p>
+            <p>ابحث بالاسم أو رقم الهاتف لفتح الملف الطبي.</p>
           </div>
         </div>
         <label className="large-search">

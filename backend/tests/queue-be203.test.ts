@@ -5,6 +5,9 @@ import {
   waitTimesQuerySchema,
 } from '../src/modules/identity-queue/queue.validators.js';
 import { computeEstimatedWaitMin } from '../src/modules/identity-queue/queue.support.js';
+import { normalizeArabic, normalizeName } from '../src/modules/identity-queue/patient.normalize.js';
+import { searchPatients } from '../src/modules/identity-queue/patient.search.js';
+import type { PrismaClient } from '@prisma/client';
 import { AppError } from '../src/common/errors/AppError.js';
 
 // ---------------------------------------------------------------------------
@@ -128,5 +131,88 @@ import { AppError } from '../src/common/errors/AppError.js';
   );
 }
 
+// ---------------------------------------------------------------------------
+// P0-3: Arabic normalization tests (bidirectional, alef/taa/yaa, tashkeel)
+// ---------------------------------------------------------------------------
+{
+  // Alef forms equivalence
+  assert.equal(normalizeName('أحمد'), normalizeName('احمد'));
+  assert.equal(normalizeName('إبراهيم'), normalizeName('ابراهيم'));
+  assert.equal(normalizeName('آدم'), normalizeName('ادم'));
+
+  // Yaa and Alef Maksura equivalence
+  assert.equal(normalizeName('ندى'), normalizeName('ندي'));
+  assert.equal(normalizeName('منى'), normalizeName('مني'));
+
+  // Taa Marbuta and Haa equivalence
+  assert.equal(normalizeName('فاطمة'), normalizeName('فاطمه'));
+  assert.equal(normalizeName('سارة'), normalizeName('ساره'));
+
+  // Tashkeel / diacritics stripping
+  assert.equal(normalizeName('مُحَمَّد'), 'محمد');
+  assert.equal(normalizeName('أَحْمَدُ'), 'احمد');
+
+  // Single token matching: "محمد" matches "محمد أحمد"
+  const ptNorm = normalizeName('محمد أحمد علي');
+  const queryNorm1 = normalizeName('محمد');
+  assert.ok(ptNorm.includes(queryNorm1), '"محمد" must match in "محمد أحمد علي"');
+
+  const queryNorm2 = normalizeName('احمد');
+  assert.ok(ptNorm.includes(queryNorm2), '"احمد" must match in "محمد أحمد علي"');
+
+  const queryNorm3 = normalizeName('علي');
+  assert.ok(ptNorm.includes(queryNorm3), '"علي" must match in "محمد أحمد علي"');
+}
+
+// ---------------------------------------------------------------------------
+// P0-3: Token-based patient search query construction & execution
+// ---------------------------------------------------------------------------
+{
+  let capturedWhere: any = null;
+  const mockDb = {
+    patient: {
+      findMany: async (args: any) => {
+        capturedWhere = args.where;
+        return [
+          {
+            id: 'p1',
+            fullName: 'محمد أحمد',
+            dateOfBirth: new Date('1990-01-01'),
+            phoneNorm: '01012345678',
+            nationalIdNorm: '29001011234567',
+            outstandingBalanceMinor: 0,
+            lastVisitAt: null,
+            registrationStatus: 'COMPLETE',
+          },
+        ];
+      },
+    },
+    patientAudit: {
+      create: async () => ({ id: 'aud1' }),
+    },
+  } as unknown as PrismaClient;
+
+  const actor = { userId: 'u-doc', role: 'DOCTOR' as const };
+
+  // Single token search: "محمد"
+  const res1 = await searchPatients('محمد', actor, mockDb);
+  assert.equal(res1.length, 1);
+  assert.ok(capturedWhere.AND[1].OR.length > 0);
+
+  // Multi token search: "احمد محمد"
+  const res2 = await searchPatients('احمد محمد', actor, mockDb);
+  assert.equal(res2.length, 1);
+
+  // Phone search: "010123"
+  const res3 = await searchPatients('010123', actor, mockDb);
+  assert.equal(res3.length, 1);
+
+  // Less than 3 characters returns empty without DB query
+  capturedWhere = null;
+  const resEmpty = await searchPatients('مح', actor, mockDb);
+  assert.equal(resEmpty.length, 0);
+  assert.equal(capturedWhere, null, 'Under 3 chars must not query database');
+}
+
 // eslint-disable-next-line no-console
-console.log('BE-203 reorder/emergency/wait-time validator + formula tests passed.');
+console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search normalization tests passed.');

@@ -21,7 +21,24 @@ export async function searchPatients(
     orFilters.push({ guardianPhoneNorm: { contains: normDigits } });
   }
   if (normName.length >= 3) {
-    orFilters.push({ fullNameNorm: { contains: normName } });
+    const tokens = normName.split(/\s+/).filter((t) => t.length > 0);
+    if (tokens.length === 1) {
+      orFilters.push({
+        OR: [
+          { fullNameNorm: { contains: tokens[0] } },
+          { fullName: { contains: tokens[0], mode: 'insensitive' as const } },
+        ],
+      });
+    } else if (tokens.length > 1) {
+      orFilters.push({
+        AND: tokens.map((token) => ({
+          OR: [
+            { fullNameNorm: { contains: token } },
+            { fullName: { contains: token, mode: 'insensitive' as const } },
+          ],
+        })),
+      });
+    }
   }
   const rows =
     orFilters.length === 0

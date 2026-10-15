@@ -472,6 +472,7 @@ function SearchResults({
 }) {
   const trimmed = query.trim()
   const [debounced, setDebounced] = useState(trimmed)
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(trimmed), 350)
@@ -484,40 +485,63 @@ function SearchResults({
     enabled: debounced.length >= 3,
   })
 
+  const candidates = searchQuery.data?.data ?? []
+  const activePatientId =
+    selectedPatientId && candidates.some((c) => c.id === selectedPatientId)
+      ? selectedPatientId
+      : candidates[0]?.id ?? null
+
   const chartQuery = useQuery({
-    queryKey: ["chart", searchQuery.data?.data[0]?.id ?? "none", "soap-picker"],
-    queryFn: () => ehrApi.chart(searchQuery.data!.data[0].id, 10),
-    enabled: (searchQuery.data?.data.length ?? 0) > 0,
+    queryKey: ["chart", activePatientId ?? "none", "soap-picker"],
+    queryFn: () => ehrApi.chart(activePatientId!, 10),
+    enabled: activePatientId !== null,
   })
 
   if (debounced.length < 3) return null
+  const activeCandidate = candidates.find((c) => c.id === activePatientId)
   const encounters = chartQuery.data?.encounters ?? []
 
   return (
-    <div className="data-table" style={{ marginTop: "14px" }}>
-      <div className="data-head">
-        <span>المريض</span>
-        <span>التقرير</span>
-        <span>التاريخ</span>
-        <span />
-      </div>
-      {encounters.length === 0 && (
-        <div className="data-row">
-          <span>
-            {searchQuery.isFetching || chartQuery.isFetching
-              ? "جارٍ البحث…"
-              : "لا تقارير مطابقة."}
-          </span>
+    <div style={{ marginTop: "14px" }}>
+      {candidates.length > 1 && (
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px" }}>
+          {candidates.map((cand) => (
+            <button
+              key={cand.id}
+              type="button"
+              className={`chip ${cand.id === activePatientId ? "active" : ""}`}
+              onClick={() => setSelectedPatientId(cand.id)}
+            >
+              {cand.fullName} ({cand.id.slice(-6)})
+            </button>
+          ))}
         </div>
       )}
-      {encounters.map((enc) => (
-        <button className="data-row" key={enc.encounterId} onClick={() => onOpen(enc.encounterId)}>
-          <strong>{searchQuery.data?.data[0]?.fullName ?? "—"}</strong>
-          <span>{enc.encounterId.slice(-6)}</span>
-          <span>{arDate(enc.signedAt ?? enc.visitDate)}</span>
-          <Icon name="chevron" size={16} />
-        </button>
-      ))}
+      <div className="data-table">
+        <div className="data-head">
+          <span>المريض</span>
+          <span>التقرير</span>
+          <span>التاريخ</span>
+          <span />
+        </div>
+        {encounters.length === 0 && (
+          <div className="data-row">
+            <span>
+              {searchQuery.isFetching || chartQuery.isFetching
+                ? "جارٍ البحث…"
+                : "لا تقارير مطابقة."}
+            </span>
+          </div>
+        )}
+        {encounters.map((enc) => (
+          <button className="data-row" key={enc.encounterId} onClick={() => onOpen(enc.encounterId)}>
+            <strong>{activeCandidate?.fullName ?? "—"}</strong>
+            <span>{enc.encounterId.slice(-6)}</span>
+            <span>{arDate(enc.signedAt ?? enc.visitDate)}</span>
+            <Icon name="chevron" size={16} />
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
