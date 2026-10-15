@@ -120,7 +120,14 @@ select { border: 1px solid var(--border); color: var(--text); background: white;
 .queue-row.emergency { background: linear-gradient(90deg, #fff, #fff9f1); }
 .position { display: flex; align-items: center; gap: 5px; color: var(--text); font-weight: 800; }
 .move-controls { display: flex; flex-direction: column; }
-.move-controls button { border: 0; background: transparent; color: #aaa; font-size: 11px; line-height: 9px; padding: 0 3px; }
+.move-controls button { border: 0; background: transparent; color: #aaa; font-size: 11px; line-height: 9px; padding: 0 3px; cursor: pointer; }
+.move-controls button:disabled { opacity: 0.2; cursor: not-allowed; }
+.move-controls button:not(:disabled):hover { color: var(--primary); }
+.queue-row.draggable { cursor: grab; }
+.queue-row.dragging { opacity: 0.4; background: #ede9fe; cursor: grabbing; }
+.queue-row.drag-over { border-top: 2px solid var(--primary); background: #f5f3ff; }
+.drag-handle { cursor: grab; color: #a1a1aa; display: inline-flex; align-items: center; justify-content: center; width: 12px; margin-inline-end: 2px; }
+.drag-handle:active { cursor: grabbing; }
 .patient-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .patient-cell > span:nth-child(2) { min-width: 0; }
 .patient-cell strong { font-size: 10px; display: block; white-space: nowrap; }
