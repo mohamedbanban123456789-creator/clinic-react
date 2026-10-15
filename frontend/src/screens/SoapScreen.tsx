@@ -43,7 +43,7 @@ export default function SoapScreen() {
     A: string
     P: string
   } | null>(null)
-  const [reviewChecks, setReviewChecks] = useState({ S: true, O: true, A: true, P: false })
+  const [reviewChecks, setReviewChecks] = useState({ S: false, O: false, A: false, P: false })
   const [showAddendum, setShowAddendum] = useState(false)
   const [addendumText, setAddendumText] = useState("")
   const [addendumReason, setAddendumReason] = useState("CLARIFICATION")
@@ -121,7 +121,6 @@ export default function SoapScreen() {
     setParams({ encounter: id })
     setEditing(false)
     setDraftSoap(null)
-    setReviewChecks({ S: true, O: true, A: true, P: false })
   }
 
   const soapForDisplay =
@@ -131,6 +130,18 @@ export default function SoapScreen() {
         A: encounter?.soap?.A ?? "",
         P: encounter?.soap?.P ?? "",
       }
+
+  useEffect(() => {
+    if (encounter?.soap || draftSoap) {
+      setReviewChecks({
+        S: Boolean((draftSoap?.S ?? encounter?.soap?.S ?? "").trim()),
+        O: Boolean((draftSoap?.O ?? encounter?.soap?.O ?? "").trim()),
+        A: Boolean((draftSoap?.A ?? encounter?.soap?.A ?? "").trim()),
+        P: Boolean((draftSoap?.P ?? encounter?.soap?.P ?? "").trim()),
+      })
+    }
+  }, [encounter?.encounterId, encounter?.soap, draftSoap])
+
   const reviewDone = Object.values(reviewChecks).filter(Boolean).length
 
   /* ---------------------------- Picker view ---------------------------- */
@@ -383,17 +394,21 @@ export default function SoapScreen() {
         <aside className="side-stack soap-side">
           <section className="card review-checklist">
             <h3>قائمة المراجعة</h3>
-            {(["S", "O", "A", "P"] as const).map((k) => (
-              <label key={k}>
-                <input
-                  type="checkbox"
-                  checked={reviewChecks[k]}
-                  disabled={!isDraft}
-                  onChange={(e) => setReviewChecks({ ...reviewChecks, [k]: e.target.checked })}
-                />{" "}
-                قسم {k} — {sectionTitles[k].split("—")[0].trim()}
-              </label>
-            ))}
+            {(["S", "O", "A", "P"] as const).map((k) => {
+              const isFilled = Boolean(soapForDisplay[k]?.trim())
+              return (
+                <label key={k} style={{ color: isFilled ? undefined : "var(--danger)" }}>
+                  <input
+                    type="checkbox"
+                    checked={reviewChecks[k]}
+                    disabled={!isDraft}
+                    onChange={(e) => setReviewChecks({ ...reviewChecks, [k]: e.target.checked })}
+                  />{" "}
+                  قسم {k} — {sectionTitles[k].split("—")[0].trim()}{" "}
+                  {!isFilled && <span style={{ fontSize: "11px", color: "var(--danger)" }}>(غير مكتمل)</span>}
+                </label>
+              )
+            })}
             <div className="review-progress">
               <div>
                 <i style={{ width: `${(reviewDone / 4) * 100}%` }} />
