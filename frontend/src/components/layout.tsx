@@ -53,9 +53,7 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
   {
     section: "الصلاحيات الإدارية",
     items: [
-      { to: "/secretary", label: "تشغيل العيادة", icon: "building", match: ["/secretary"] },
-      { to: "/secretary/closing", label: "الخزينة اليومية", icon: "wallet", match: ["/secretary/closing"] },
-      { to: "/doctor/reports", label: "التقارير الإشرافية", icon: "chart", match: ["/doctor/reports"] },
+      { to: "/doctor/reports", label: "التقارير الإشرافية والمالية", icon: "chart", match: ["/doctor/reports"] },
       { to: "/doctor/settings", label: "الإعدادات والمستخدمون", icon: "lock", match: ["/doctor/settings"] },
     ],
   },
@@ -95,19 +93,6 @@ export function Sidebar() {
           <strong>سكينة</strong>
           <small>لإدارة العيادات النفسية</small>
         </div>
-      </div>
-      <div className="role-switch">
-        <button className={!isDoctor ? "active" : ""} onClick={() => navigate("/secretary")}>
-          الاستقبال
-        </button>
-        <button
-          className={isDoctor ? "active" : ""}
-          onClick={() => navigate("/doctor")}
-          disabled={!isDoctor}
-          title={isDoctor ? "" : "هذه المساحة متاحة لحساب الطبيب"}
-        >
-          الطبيب
-        </button>
       </div>
       <nav>
         {nav.map((group) => (

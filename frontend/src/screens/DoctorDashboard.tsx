@@ -453,16 +453,6 @@ export default function DoctorDashboard() {
               مراجعة
             </AppButton>
           </section>
-          <section className="card admin-access">
-            <Icon name="building" />
-            <div>
-              <h3>وصول إداري</h3>
-              <p>راجع تشغيل الاستقبال والخزينة دون مغادرة مساحة الطبيب.</p>
-            </div>
-            <button onClick={() => navigate("/secretary")} title="تشغيل العيادة">
-              <Icon name="arrow" />
-            </button>
-          </section>
         </aside>
       </div>
 

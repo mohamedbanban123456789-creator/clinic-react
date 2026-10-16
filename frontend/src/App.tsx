@@ -99,6 +99,14 @@ function RequireDoctor({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequireSecretary({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth()
+  if (user?.role === "DOCTOR") {
+    return <Navigate to="/doctor" replace />
+  }
+  return <>{children}</>
+}
+
 function HomeRedirect() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
@@ -125,9 +133,11 @@ export default function App() {
                 path="/secretary"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <SecretaryDashboard />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <SecretaryDashboard />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -135,9 +145,11 @@ export default function App() {
                 path="/secretary/checkin"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <CheckInScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <CheckInScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -145,9 +157,11 @@ export default function App() {
                 path="/secretary/payments"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <PaymentsScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <PaymentsScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -155,9 +169,11 @@ export default function App() {
                 path="/secretary/receipts"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ReceiptsScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <ReceiptsScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -165,9 +181,11 @@ export default function App() {
                 path="/secretary/closing"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ClosingScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <ClosingScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
