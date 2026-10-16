@@ -3,23 +3,32 @@ import { authenticate, requireAuth, requireFreshPassword } from '../../common/mi
 import { requireRole } from '../../common/middleware/requireRole.js';
 import { validate } from '../../common/middleware/validate.js';
 import {
+  cancelScribeSession,
   commitScribeSession,
+  deleteScribeSession,
   getScribeTranscript,
   purgeScribeAudioFiles,
   runCycle1Consultation,
   runCycle2DoctorDecision,
   startScribeSession,
+  stopScribeSession,
   withdrawConsentScribeSession,
 } from './scribe.service.js';
 import {
   audioUploadSchema,
+  cancelSessionSchema,
   commitSessionSchema,
   createSessionSchema,
+  deleteSessionSchema,
   sessionIdParamSchema,
+  stopSessionSchema,
   withdrawConsentSchema,
   type AudioUploadInput,
+  type CancelSessionInput,
   type CommitSessionInput,
   type CreateSessionInput,
+  type DeleteSessionInput,
+  type StopSessionInput,
   type WithdrawConsentInput,
 } from './scribe.validators.js';
 
@@ -152,3 +161,58 @@ scribeRouter.post(
       .catch(next);
   },
 );
+
+// POST /api/v1/scribe/sessions/:id/cancel [DOCTOR] -> 200 { sessionId, status: WITHDRAWN, cancelled: true }
+scribeRouter.post(
+  '/sessions/:id/cancel',
+  requireRole('DOCTOR'),
+  validate(sessionIdParamSchema, 'params'),
+  validate(cancelSessionSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    cancelScribeSession(params.id, (req.body ?? {}) as CancelSessionInput, {
+      userId: auth.userId,
+      role: auth.role,
+    })
+      .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/scribe/sessions/:id/stop [DOCTOR] -> 200 { sessionId, status, stoppedAt }
+scribeRouter.post(
+  '/sessions/:id/stop',
+  requireRole('DOCTOR'),
+  validate(sessionIdParamSchema, 'params'),
+  validate(stopSessionSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    stopScribeSession(params.id, (req.body ?? {}) as StopSessionInput, {
+      userId: auth.userId,
+      role: auth.role,
+    })
+      .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+
+// DELETE /api/v1/scribe/sessions/:id [DOCTOR] -> 200 { sessionId, deleted: true }
+scribeRouter.delete(
+  '/sessions/:id',
+  requireRole('DOCTOR'),
+  validate(sessionIdParamSchema, 'params'),
+  validate(deleteSessionSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    deleteScribeSession(params.id, (req.body ?? {}) as DeleteSessionInput, {
+      userId: auth.userId,
+      role: auth.role,
+    })
+      .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+

@@ -7,23 +7,205 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useAuth } from "@/auth/AuthContext"
 import { useQueue, useQueueInvalidation } from "@/hooks/useQueue"
 import { queueApi } from "@/api/queue"
 import { supervisionApi, settingsApi } from "@/api/admin"
 import { billingApi } from "@/api/billing"
-import { apiErrorMessage } from "@/api/client"
+import { patientsApi } from "@/api/patients"
+import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
-import { FloatingChat } from "@/components/Conversation"
-import { arNum, arTimer } from "@/lib/format"
+import { useChat } from "@/context/ChatContext"
+import { useCallRequest } from "@/realtime/socket"
+import { arNum, arTimer, arDate, ageFromDob, arAgo, moneyMinor } from "@/lib/format"
+import { emergencyReasonLabel } from "@/lib/constants"
+import type { UnsignedNotesDto, QueueEntryDto } from "@/api/types"
+
+function ReviewModal({
+  data,
+  onClose,
+  onRefresh,
+}: {
+  data: UnsignedNotesDto | undefined
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  const { notify } = useToast()
+  const navigate = useNavigate()
+  const [deferringEntryId, setDeferringEntryId] = useState<string | null>(null)
+  const [deferReason, setDeferReason] = useState("")
+
+  const deferMutation = useMutation({
+    mutationFn: ({ entryId, reason }: { entryId: string; reason: string }) =>
+      queueApi.deferDocumentation(entryId, reason),
+    onSuccess: () => {
+      notify("تم تسجيل تأجيل التوثيق بنجاح")
+      setDeferringEntryId(null)
+      setDeferReason("")
+      onRefresh()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const unsignedList = (data?.completedWithoutSigned ?? []).filter((c) => !c.isDeferred)
+  const deferredList = (data?.completedWithoutSigned ?? []).filter((c) => c.isDeferred)
+
+  return (
+    <Modal
+      title="مراجعة التوثيق والكشوفات"
+      subtitle="الكشوفات المكتملة غير الموثقة والتأجيلات المسجلة اليوم."
+      onClose={onClose}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", textAlign: "right" }}>
+        <div>
+          <h4 style={{ margin: "0 0 0.5rem 0", color: "#1e1b4b" }}>
+            كشوفات بانتظار التوثيق والتوقيع ({arNum(unsignedList.length)})
+          </h4>
+          {unsignedList.length === 0 ? (
+            <p style={{ color: "#6b7280", margin: 0, fontSize: "0.9rem" }}>
+              جميع كشوفات اليوم موثقة وموقعة بنجاح.
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              {unsignedList.map((item) => (
+                <div
+                  key={item.queueEntryId}
+                  style={{
+                    padding: "0.75rem",
+                    borderRadius: "8px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <strong style={{ fontSize: "1rem" }}>{item.displayName}</strong>
+                      <span style={{ fontSize: "0.8rem", color: "#6b7280", marginRight: "0.5rem" }}>
+                        اكتمل الكشف {item.completedAt ? arDate(item.completedAt) : ""}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <AppButton
+                        variant="primary"
+                        onClick={() => {
+                          onClose()
+                          navigate(`/doctor/soap?patientId=${item.patientId}&queueEntryId=${item.queueEntryId}`)
+                        }}
+                      >
+                        توثيق SOAP
+                      </AppButton>
+                      <AppButton
+                        variant="outline"
+                        onClick={() => {
+                          setDeferringEntryId(item.queueEntryId)
+                          setDeferReason("")
+                        }}
+                      >
+                        تأجيل التوثيق
+                      </AppButton>
+                    </div>
+                  </div>
+
+                  {deferringEntryId === item.queueEntryId && (
+                    <div style={{ marginTop: "0.75rem", padding: "0.5rem", background: "#fff", borderRadius: "6px", border: "1px solid #e5e7eb" }}>
+                      <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "bold", marginBottom: "0.25rem" }}>
+                        سبب تأجيل التوثيق (مطلوب):
+                      </label>
+                      <input
+                        value={deferReason}
+                        onChange={(e) => setDeferReason(e.target.value)}
+                        placeholder="اكتب سبب التأجيل (مثال: بانتظار نتائج التحاليل، انشغال طارئ)..."
+                        style={{ width: "100%", padding: "0.4rem 0.6rem", borderRadius: "4px", border: "1px solid #d1d5db", fontSize: "0.85rem" }}
+                      />
+                      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", justifyContent: "flex-end" }}>
+                        <AppButton variant="outline" onClick={() => setDeferringEntryId(null)}>
+                          إلغاء
+                        </AppButton>
+                        <AppButton
+                          variant="secondary"
+                          onClick={() =>
+                            deferMutation.mutate({ entryId: item.queueEntryId, reason: deferReason.trim() })
+                          }
+                          disabled={deferMutation.isPending || deferReason.trim().length < 3}
+                        >
+                          {deferMutation.isPending ? "جارٍ الحفظ..." : "تأكيد التأجيل"}
+                        </AppButton>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {deferredList.length > 0 && (
+          <div>
+            <h4 style={{ margin: "0 0 0.5rem 0", color: "#b45309" }}>
+              حالات التوثيق المؤجلة ({arNum(deferredList.length)})
+            </h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {deferredList.map((item) => (
+                <div
+                  key={item.queueEntryId}
+                  style={{
+                    padding: "0.6rem 0.75rem",
+                    borderRadius: "6px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <div style={{ fontSize: "0.8rem", color: "#78350f" }}>
+                      سبب التأجيل: {item.deferredReason || "غير محدد"}
+                    </div>
+                  </div>
+                  <AppButton
+                    variant="outline"
+                    onClick={() => {
+                      onClose()
+                      navigate(`/doctor/soap?patientId=${item.patientId}&queueEntryId=${item.queueEntryId}`)
+                    }}
+                  >
+                    توثيق الآن
+                  </AppButton>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <AppButton variant="outline" onClick={onClose}>
+            إغلاق
+          </AppButton>
+        </div>
+      </div>
+    </Modal>
+  )
+}
 
 export default function DoctorDashboard() {
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
   const navigate = useNavigate()
   const { notify } = useToast()
-  const { entries, isLoading, queueVersion } = useQueue()
+  const queryClient = useQueryClient()
+  const { queue, entries, isLoading, queueVersion } = useQueue()
   const invalidate = useQueueInvalidation()
-  const [chatOpen, setChatOpen] = useState(false)
+  const { setOnComplimentary } = useChat()
   const [showComplimentary, setShowComplimentary] = useState(false)
+  const [showReviewModal, setShowReviewModal] = useState(false)
+
+  useEffect(() => {
+    setOnComplimentary(() => () => setShowComplimentary(true))
+    return () => setOnComplimentary(undefined)
+  }, [setOnComplimentary])
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -34,6 +216,7 @@ export default function DoctorDashboard() {
   const unsignedQuery = useQuery({
     queryKey: ["supervision", "unsigned-notes"],
     queryFn: () => supervisionApi.unsignedNotes(),
+    enabled: isDoctor,
     refetchInterval: 120_000,
   })
 
@@ -62,13 +245,67 @@ export default function DoctorDashboard() {
     return () => window.clearInterval(timer)
   }, [current?.calledAt])
 
+  const [pendingCallPatient, setPendingCallPatient] = useState<QueueEntryDto | null>(null)
+
+  const pendingPatientDetailQuery = useQuery({
+    queryKey: ["patients", pendingCallPatient?.patientId],
+    queryFn: () => patientsApi.get(pendingCallPatient!.patientId),
+    enabled: !!pendingCallPatient?.patientId,
+  })
+
+  const handleOpenCallReview = () => {
+    if (waiting.length === 0 || queue?.activeCallRequest) return
+    setPendingCallPatient(waiting[0])
+  }
+
+  const createCallRequestMutation = useMutation({
+    mutationFn: (opts?: { entryId?: string }) => queueApi.createCallRequest(opts?.entryId),
+    onSuccess: (req) => {
+      notify(`تم إرسال طلب استدعاء للمريض ${req.patientName} إلى السكرتارية`)
+      setPendingCallPatient(null)
+      invalidate()
+    },
+    onError: (err) => {
+      const msg = apiErrorMessage(err)
+      notify(msg, "error")
+      if ((err as ApiError)?.code === "DOCUMENTATION_REQUIRED" || msg.includes("توثيق")) {
+        setShowReviewModal(true)
+      }
+    },
+  })
+
+  const cancelCallRequestMutation = useMutation({
+    mutationFn: (id: string) => queueApi.cancelCallRequest(id),
+    onSuccess: (req) => {
+      notify(`تم إلغاء طلب استدعاء ${req.patientName}`)
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  useCallRequest((event) => {
+    if (event.type === "approved") {
+      notify(`المريض ${event.payload.patientName} جاهز وداخل العيادة الآن`, "success")
+      invalidate()
+    } else if (event.type === "cancelled") {
+      notify(`تم إلغاء طلب استدعاء ${event.payload.patientName}`)
+      invalidate()
+    }
+  })
+
   const callNextMutation = useMutation({
     mutationFn: () => queueApi.callNext(),
     onSuccess: (entry) => {
       notify(`تم استدعاء ${entry.displayName}`)
       invalidate()
     },
-    onError: (err) => notify(apiErrorMessage(err), "error"),
+    onError: (err) => {
+      const msg = apiErrorMessage(err)
+      notify(msg, "error")
+      if ((err as ApiError)?.code === "DOCUMENTATION_REQUIRED" || msg.includes("توثيق")) {
+        setShowReviewModal(true)
+      }
+    },
   })
 
   const skipMutation = useMutation({
@@ -118,7 +355,7 @@ export default function DoctorDashboard() {
           <p>
             {current
               ? `${current.patientId.slice(-6)} · ${
-                  current.isEmergency ? "حالة طارئة" : "زيارة في الوردية"
+                  current.isEmergency ? "حالة طارئة" : "زيارة اليوم"
                 } · ${arTimer(elapsed)} منذ الاستدعاء`
               : "اضغط استدعاء التالي لبدء جلسة جديدة مع أول مريض في الطابور."}
           </p>
@@ -149,8 +386,20 @@ export default function DoctorDashboard() {
                 </AppButton>
               </>
             ) : (
-              <AppButton icon="phone" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || waiting.length === 0}>
-                {callNextMutation.isPending ? "جارٍ الاستدعاء..." : "استدعاء المريض التالي"}
+              <AppButton
+                icon="phone"
+                onClick={handleOpenCallReview}
+                disabled={
+                  Boolean(queue?.activeCallRequest) ||
+                  createCallRequestMutation.isPending ||
+                  waiting.length === 0
+                }
+              >
+                {queue?.activeCallRequest
+                  ? "بانتظار دخول المريض..."
+                  : createCallRequestMutation.isPending
+                    ? "جارٍ إرسال الطلب..."
+                    : "طلب المريض التالي"}
               </AppButton>
             )}
           </div>
@@ -180,14 +429,18 @@ export default function DoctorDashboard() {
         <StatCard
           label="زيارات مكتملة"
           value={arNum(completed.length)}
-          hint={`من أصل ${arNum(entries.length)} في الوردية`}
+          hint={`من أصل ${arNum(entries.length)} اليوم`}
           icon="check"
           tone="mint"
         />
         <StatCard
           label="تقارير للمراجعة"
           value={arNum(draftsCount)}
-          hint="مسودات وزيارات غير موثقة"
+          hint={
+            (unsignedQuery.data?.deferralCount ?? 0) > 0
+              ? `${arNum(unsignedQuery.data?.deferralCount ?? 0)} كشف مؤجل التوثيق`
+              : "مسودات وزيارات غير موثقة"
+          }
           icon="sparkle"
           tone="violet"
         />
@@ -208,10 +461,59 @@ export default function DoctorDashboard() {
               <span className="section-kicker">قائمة الانتظار</span>
               <h3>المرضى القادمون</h3>
             </div>
-            <AppButton icon="phone" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || waiting.length === 0}>
-              استدعاء التالي
+            <AppButton
+              icon="phone"
+              onClick={handleOpenCallReview}
+              disabled={
+                Boolean(queue?.activeCallRequest) ||
+                createCallRequestMutation.isPending ||
+                waiting.length === 0
+              }
+            >
+              {queue?.activeCallRequest ? "بانتظار الدخول..." : "طلب التالي"}
             </AppButton>
           </div>
+
+          {queue?.activeCallRequest && (
+            <div
+              style={{
+                background: "var(--color-primary-soft, #EEEBFF)",
+                border: "1px solid var(--color-primary, #6554D9)",
+                borderRadius: "12px",
+                padding: "14px 18px",
+                marginBottom: "16px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <Icon name="phone" size={18} />
+                <div>
+                  <strong style={{ color: "var(--color-text-primary, #29264F)", fontSize: "14px" }}>
+                    الدكتور مستني مريض ({queue.activeCallRequest.patientName})
+                  </strong>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: "13px",
+                      color: "var(--color-text-secondary, #55566F)",
+                    }}
+                  >
+                    تم إرسال الطلب إلى السكرتارية. بانتظار تجهيز المريض وتأكيد دخوله للعيادة...
+                  </p>
+                </div>
+              </div>
+              <AppButton
+                variant="outline"
+                onClick={() => cancelCallRequestMutation.mutate(queue.activeCallRequest!.id)}
+                disabled={cancelCallRequestMutation.isPending}
+              >
+                إلغاء الطلب
+              </AppButton>
+            </div>
+          )}
           {isLoading && <p>جارٍ تحميل الطابور…</p>}
           {!isLoading && waiting.length === 0 && (
             <p>لا مرضى في الانتظار — سيظهر القادمون هنا تلقائيًا.</p>
@@ -227,7 +529,7 @@ export default function DoctorDashboard() {
                 <strong>{p.displayName}</strong>
                 <small>
                   {p.patientId.slice(-6)} ·{" "}
-                  {p.isEmergency ? "حالة طارئة" : "زيارة في الوردية"}
+                  {p.isEmergency ? "حالة طارئة" : "زيارة اليوم"}
                 </small>
               </div>
               {p.isEmergency && (
@@ -253,35 +555,35 @@ export default function DoctorDashboard() {
             <div className="ai-icon">
               <Icon name="sparkle" />
             </div>
-            <span className="section-kicker">مساعد التوثيق</span>
+            <span className="section-kicker">المراجعة والتوثيق</span>
             <h3>
               {draftsCount > 0
-                ? `${arNum(draftsCount)} ${draftsCount === 1 ? "مسودة" : "مسودات"} بانتظار المراجعة`
-                : "لا مسودات معلقة"}
+                ? `${arNum(draftsCount)} ${draftsCount === 1 ? "كشف بحاجة للتوثيق" : "كشوفات بحاجة للتوثيق"}`
+                : "جميع الكشوفات موثقة"}
             </h3>
-            <p>أنهِ مراجعة تقارير SOAP قبل اعتماد سجل اليوم.</p>
-            <AppButton variant="secondary" onClick={() => navigate("/doctor/soap")}>
-              مراجعة التقارير
+            <p>
+              {(unsignedQuery.data?.deferralCount ?? 0) > 0
+                ? `هناك ${arNum(unsignedQuery.data?.deferralCount ?? 0)} حالة توثيق مؤجلة تتطلب المتابعة.`
+                : "راجع كشوفات اليوم غير الموقعة والتأجيلات المسجلة."}
+            </p>
+            <AppButton variant="secondary" onClick={() => setShowReviewModal(true)}>
+              مراجعة
             </AppButton>
-          </section>
-          <section className="card admin-access">
-            <Icon name="building" />
-            <div>
-              <h3>وصول إداري</h3>
-              <p>راجع تشغيل الاستقبال والخزينة دون مغادرة مساحة الطبيب.</p>
-            </div>
-            <button onClick={() => navigate("/secretary")} title="تشغيل العيادة">
-              <Icon name="arrow" />
-            </button>
           </section>
         </aside>
       </div>
 
-      <FloatingChat
-        open={chatOpen}
-        setOpen={setChatOpen}
-        onComplimentary={() => setShowComplimentary(true)}
-      />
+
+      {showReviewModal && (
+        <ReviewModal
+          data={unsignedQuery.data}
+          onClose={() => setShowReviewModal(false)}
+          onRefresh={() => {
+            void unsignedQuery.refetch()
+            invalidate()
+          }}
+        />
+      )}
 
       {showComplimentary && (
         <Modal
@@ -313,6 +615,179 @@ export default function DoctorDashboard() {
             <AppButton variant="outline" onClick={() => setShowComplimentary(false)}>
               إلغاء
             </AppButton>
+          </div>
+        </Modal>
+      )}
+
+      {pendingCallPatient && (
+        <Modal
+          title="مراجعة بيانات المريض قبل الاستدعاء"
+          subtitle="خطوة مراجعة إلزامية للتحقق من المريض القادم قبل دخول الجلسة."
+          onClose={() => setPendingCallPatient(null)}
+        >
+          <div className="review-patient-panel" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div
+              style={{
+                background: "var(--color-primary-soft, #EEEBFF)",
+                padding: "16px",
+                borderRadius: "12px",
+                border: "1px solid var(--color-border, #E1E4F0)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "12px",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary, #55566F)" }}>
+                    المريض التالي في الطابور
+                  </span>
+                  <h3
+                    style={{
+                      margin: "2px 0 0",
+                      color: "var(--color-text-primary, #29264F)",
+                      fontSize: "18px",
+                    }}
+                  >
+                    {pendingCallPatient.displayName}
+                  </h3>
+                </div>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    background: "#FFF",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--color-border, #E1E4F0)",
+                  }}
+                >
+                  معرّف: {pendingCallPatient.patientId.slice(-6)}
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <small style={{ color: "var(--color-text-muted, #686982)", display: "block" }}>
+                    العمر
+                  </small>
+                  <strong style={{ fontSize: "15px" }}>
+                    {pendingPatientDetailQuery.isLoading
+                      ? "جارٍ التحميل..."
+                      : pendingPatientDetailQuery.data?.dateOfBirth
+                        ? `${arNum(ageFromDob(pendingPatientDetailQuery.data.dateOfBirth) ?? 0)} سنة`
+                        : "غير مسجل"}
+                  </strong>
+                </div>
+                <div>
+                  <small style={{ color: "var(--color-text-muted, #686982)", display: "block" }}>
+                    آخر زيارة
+                  </small>
+                  <strong style={{ fontSize: "15px" }}>
+                    {pendingPatientDetailQuery.isLoading
+                      ? "جارٍ التحميل..."
+                      : pendingPatientDetailQuery.data?.pastVisitTimestamps?.[0]
+                        ? arAgo(pendingPatientDetailQuery.data.pastVisitTimestamps[0])
+                        : "زيارة أولى (لا زيارات سابقة)"}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--color-text-primary, #29264F)",
+                }}
+              >
+                تنبيهات المريض:
+              </span>
+
+              {pendingCallPatient.isEmergency && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: "rgba(180, 35, 54, 0.1)",
+                    color: "#B42336",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  <Icon name="alert" size={16} />
+                  <span>
+                    <strong>حالة طارئة:</strong>{" "}
+                    {emergencyReasonLabel[pendingCallPatient.emergencyReasonCode ?? ""] ||
+                      "تم تصنيف الحالة كأولوية قصوى"}
+                  </span>
+                </div>
+              )}
+
+              {pendingCallPatient.debtAlert && pendingCallPatient.debtAlert.outstandingMinor > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: "rgba(180, 83, 9, 0.1)",
+                    color: "#B45309",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  <Icon name="wallet" size={16} />
+                  <span>
+                    <strong>رصيد مستحق غير مسدد:</strong>{" "}
+                    {moneyMinor(pendingCallPatient.debtAlert.outstandingMinor)}
+                  </span>
+                </div>
+              )}
+
+              {!pendingCallPatient.isEmergency &&
+                (!pendingCallPatient.debtAlert ||
+                  pendingCallPatient.debtAlert.outstandingMinor <= 0) && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: "rgba(8, 127, 140, 0.1)",
+                      color: "#087F8C",
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <Icon name="check" size={16} />
+                    <span>لا توجد تنبيهات طارئة أو ديون مستحقة على المريض.</span>
+                  </div>
+                )}
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: "8px" }}>
+              <AppButton variant="outline" type="button" onClick={() => setPendingCallPatient(null)}>
+                إلغاء
+              </AppButton>
+              <AppButton
+                icon="phone"
+                onClick={() => {
+                  createCallRequestMutation.mutate({ entryId: pendingCallPatient.entryId })
+                }}
+                disabled={createCallRequestMutation.isPending}
+              >
+                {createCallRequestMutation.isPending ? "جارٍ إرسال الطلب..." : "طلب المريض التالي"}
+              </AppButton>
+            </div>
           </div>
         </Modal>
       )}

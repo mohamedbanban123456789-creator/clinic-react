@@ -6,11 +6,15 @@
  * administrative shortcut into the clinic-operations area.
  */
 
-import { useMemo, useState } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
-import { Icon, type IconName } from "@/components/ui"
+import { useEffect, useMemo, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
+import { AppButton, Icon, type IconName, Modal, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useChat } from "@/context/ChatContext"
+import { FloatingChat } from "@/components/Conversation"
+import { apiErrorMessage } from "@/api/client"
 import { arToday } from "@/lib/format"
+import { secretaryRoleTitle } from "@/lib/constants"
 
 interface NavItem {
   to: string
@@ -32,7 +36,6 @@ const secretaryNav: { section: string; items: NavItem[] }[] = [
   {
     section: "التشغيل",
     items: [
-      { to: "/chat", label: "التواصل الداخلي", icon: "message", match: ["/chat"] },
       { to: "/secretary/closing", label: "الإغلاق اليومي", icon: "chart", match: ["/secretary/closing"] },
       { to: "/display", label: "شاشة الانتظار", icon: "building", match: ["/display"] },
     ],
@@ -46,29 +49,45 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
       { to: "/doctor", label: "لوحة الطبيب", icon: "grid", match: ["/doctor"] },
       { to: "/doctor/patients", label: "ملفات المرضى", icon: "users", match: ["/doctor/patients", "/doctor/patients/"] },
       { to: "/doctor/session", label: "الجلسة الحالية", icon: "mic", match: ["/doctor/session"] },
-      { to: "/doctor/soap", label: "تقارير SOAP", icon: "file", match: ["/doctor/soap"] },
       { to: "/doctor/medications", label: "إدارة الأدوية", icon: "pill", match: ["/doctor/medications"] },
     ],
   },
   {
     section: "الصلاحيات الإدارية",
     items: [
-      { to: "/secretary", label: "تشغيل العيادة", icon: "building", match: ["/secretary"] },
-      { to: "/secretary/closing", label: "الخزينة اليومية", icon: "wallet", match: ["/secretary/closing"] },
-      { to: "/doctor/reports", label: "التقارير الإشرافية", icon: "chart", match: ["/doctor/reports"] },
+      { to: "/doctor/reports", label: "التقارير الإشرافية والمالية", icon: "chart", match: ["/doctor/reports"] },
       { to: "/doctor/settings", label: "الإعدادات والمستخدمون", icon: "lock", match: ["/doctor/settings"] },
     ],
   },
 ]
 
+function getInitial(name: string | null | undefined): string {
+  if (!name || /^\?+$/.test(name.trim())) return "س"
+  const clean = name.trim().replace(/^د\.\s*/, "")
+  return clean.charAt(0) || "س"
+}
+
+function getSafeName(name: string | null | undefined, isDoctor: boolean, gender?: string): string {
+  if (!name || /^\?+$/.test(name.trim())) {
+    return isDoctor ? "د. أحمد سامي" : (gender === "MALE" ? "أحمد محمود" : "سارة محمود")
+  }
+  return name.trim()
+}
+
 export function Sidebar() {
-  const { user, logout } = useAuth()
+  const { user, logout, updateName } = useAuth()
+  const { notify } = useToast()
   const location = useLocation()
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
   const nav = isDoctor ? doctorNav : secretaryNav
-  const initial = user?.name?.trim().charAt(0) ?? "؟"
-  const roleLabel = isDoctor ? "طبيب/ة نفسية" : "مسؤولة الاستقبال"
+  const displayName = getSafeName(user?.name, isDoctor, user?.gender)
+  const initial = getInitial(displayName)
+  const roleLabel = isDoctor ? "طبيب/ة نفسية" : secretaryRoleTitle(user?.gender)
+
+  const [showEditName, setShowEditName] = useState(false)
+  const [newName, setNewName] = useState("")
+  const [nameBusy, setNameBusy] = useState(false)
 
   return (
     <aside className="sidebar">
@@ -81,19 +100,6 @@ export function Sidebar() {
           <strong>سكينة</strong>
           <small>لإدارة العيادات النفسية</small>
         </div>
-      </div>
-      <div className="role-switch">
-        <button className={!isDoctor ? "active" : ""} onClick={() => navigate("/secretary")}>
-          الاستقبال
-        </button>
-        <button
-          className={isDoctor ? "active" : ""}
-          onClick={() => navigate("/doctor")}
-          disabled={!isDoctor}
-          title={isDoctor ? "" : "هذه المساحة متاحة لحساب الطبيب"}
-        >
-          الطبيب
-        </button>
       </div>
       <nav>
         {nav.map((group) => (
@@ -122,8 +128,22 @@ export function Sidebar() {
       </nav>
       <div className="sidebar-profile">
         <div className="avatar">{initial}</div>
-        <div>
-          <strong>{user?.name ?? "—"}</strong>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer" }}
+            onClick={() => {
+              setNewName(user?.name || displayName)
+              setShowEditName(true)
+            }}
+            title="تعديل الاسم"
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {displayName}
+            </span>
+            <span style={{ opacity: 0.7, flexShrink: 0, display: "inline-flex" }}>
+              <Icon name="edit" size={13} />
+            </span>
+          </strong>
           <small>{roleLabel}</small>
         </div>
         <button
@@ -134,16 +154,62 @@ export function Sidebar() {
           <Icon name="logout" size={18} />
         </button>
       </div>
+
+      {showEditName && (
+        <Modal
+          title="تعديل اسم العرض"
+          subtitle="سيظهر هذا الاسم في لوحة التحكم والمحادثات والتقارير."
+          onClose={() => setShowEditName(false)}
+        >
+          <form
+            className="modal-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!newName.trim() || nameBusy) return
+              setNameBusy(true)
+              try {
+                await updateName(newName.trim())
+                notify("تم تحديث الاسم بنجاح")
+                setShowEditName(false)
+              } catch (err) {
+                notify(apiErrorMessage(err), "error")
+              } finally {
+                setNameBusy(false)
+              }
+            }}
+          >
+            <label className="field">
+              <span>الاسم <b>*</b></span>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="أدخل الاسم الجديد"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <AppButton variant="outline" type="button" onClick={() => setShowEditName(false)}>
+                إلغاء
+              </AppButton>
+              <AppButton type="submit" disabled={nameBusy || !newName.trim()}>
+                {nameBusy ? "جارٍ الحفظ..." : "حفظ التعديل"}
+              </AppButton>
+            </div>
+          </form>
+        </Modal>
+      )}
     </aside>
   )
 }
 
 export function Header({ title }: { title: string }) {
   const { user } = useAuth()
+  const { toggleChat, unreadCount } = useChat()
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
-  const initial = user?.name?.trim().charAt(0) ?? "؟"
+  const displayName = getSafeName(user?.name, isDoctor, user?.gender)
+  const initial = getInitial(displayName)
 
   const searchTarget = useMemo(() => {
     if (query.trim().length >= 3) {
@@ -180,10 +246,16 @@ export function Header({ title }: { title: string }) {
           <Icon name="calendar" size={17} />
           <span>{arToday()}</span>
         </div>
-        <Link to="/chat" className="icon-button notification" title="الإشعارات">
+        <button
+          type="button"
+          className="icon-button notification"
+          title="التواصل الداخلي والإشعارات"
+          onClick={toggleChat}
+          style={{ cursor: "pointer" }}
+        >
           <Icon name="bell" size={19} />
-          <i />
-        </Link>
+          {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+        </button>
         <button
           className="mini-profile"
           onClick={() => navigate(isDoctor ? "/doctor" : "/secretary")}
@@ -191,7 +263,7 @@ export function Header({ title }: { title: string }) {
         >
           <span className="avatar small">{initial}</span>
           <span>
-            <strong>{user?.name?.split(" ").slice(0, 2).join(" ") ?? "—"}</strong>
+            <strong>{displayName.split(" ").slice(0, 2).join(" ")}</strong>
             <small>{isDoctor ? "طبيب/ة" : "استقبال"}</small>
           </span>
           <Icon name="chevron" size={14} />
@@ -209,6 +281,8 @@ export function AppShell({ title, children }: { title: string; children: React.R
         <Header title={title} />
         <main className="page">{children}</main>
       </div>
+      <FloatingChat />
     </div>
   )
 }
+

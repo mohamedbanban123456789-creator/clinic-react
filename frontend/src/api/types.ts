@@ -24,15 +24,19 @@ export interface ApiErrorShape {
 
 /* ---------------------------- Auth ---------------------------- */
 
+export type Gender = "MALE" | "FEMALE"
+
 export interface UserDto {
   id: string
   name: string
   role: "DOCTOR" | "SECRETARY"
+  gender?: Gender
 }
 
 export interface MeDto extends UserDto {
   lastLoginAt: string | null
   passwordMustChange: boolean
+  gender?: Gender
 }
 
 export interface LoginResponse {
@@ -64,6 +68,7 @@ export interface UserListItemDto {
   name: string
   identifier: string
   role: "DOCTOR" | "SECRETARY"
+  gender?: Gender
   isActive: boolean
 }
 
@@ -95,6 +100,7 @@ export interface PatientSearchCandidateDto {
   id: string
   fullName: string
   dateOfBirth: string
+  phone: string | null
   phoneLast4: string | null
   nationalIdLast4: string | null
   lastVisitAt: string | null
@@ -107,6 +113,17 @@ export interface PatientSearchCandidateDto {
 export interface DebtAlertDto {
   outstandingMinor: number
   oldestInvoiceDate: string | null
+}
+
+export interface CallRequestDto {
+  id: string
+  queueEntryId: string
+  patientId: string
+  patientName: string
+  requestedByUserId: string
+  status: "PENDING" | "APPROVED" | "CANCELLED"
+  createdAt: string
+  updatedAt: string
 }
 
 export interface QueueEntryDto {
@@ -127,6 +144,7 @@ export interface QueueEntryDto {
   debtAckAt: string | null
   debtAlert: DebtAlertDto | null
   queueVersion: number
+  hasPendingCallRequest?: boolean
 }
 
 export interface QueueListDto {
@@ -134,6 +152,7 @@ export interface QueueListDto {
   queueVersion: number
   estimatedWaitMin: number
   entries: QueueEntryDto[]
+  activeCallRequest?: CallRequestDto | null
 }
 
 export interface WaitTimesDto {
@@ -354,13 +373,23 @@ export interface AddendumDto {
   createdAt: string
 }
 
+export interface StructuredDiagnosisDto {
+  name: string
+  code?: string
+  type?: "PRIMARY" | "SECONDARY" | "DIFFERENTIAL"
+  notes?: string
+}
+
+export type DiagnosisEntryDto = string | StructuredDiagnosisDto
+
 export interface ChartEncounterDto {
   encounterId: string
   source: "MANUAL" | "SCRIBE"
   visitDate: string | null
   encounterType: string | null
   signedAt: string | null
-  diagnoses: string[]
+  diagnoses: DiagnosisEntryDto[]
+  diagnosisNotes?: string | null
   soap: SoapDto
   mse: MseDto
   finalContentHash: string | null
@@ -540,6 +569,9 @@ export interface UnsignedNotesDto {
     status: string
     completedAt: string
     hasSignedEncounter: boolean
+    isDeferred?: boolean
+    deferredReason?: string | null
+    deferredAt?: string | null
   }[]
   staleDrafts: {
     draftKind: "ENCOUNTER" | "SCRIBE"
@@ -550,6 +582,7 @@ export interface UnsignedNotesDto {
     ageHours: number
     stale: boolean
   }[]
+  deferralCount?: number
 }
 
 export interface DiscountItemDto {

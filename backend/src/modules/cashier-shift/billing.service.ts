@@ -3,6 +3,9 @@ import { prisma } from '../../common/prisma.js';
 import { AppError } from '../../common/errors/AppError.js';
 import { isUniqueViolation } from '../../common/db/unique-violation.js';
 import type { SecretSafe } from '../../common/types/secretSafe.js';
+import { broadcastIntercom } from '../../common/realtime.js';
+import { toSecretIntercomDto } from '../intercom-realtime/intercom.dto.js';
+import { writeAudit } from '../../common/audit.js';
 import {
   toSecretCheckoutDto,
   toSecretComplimentaryDto,
@@ -219,8 +222,70 @@ export async function checkout(
           : {}),
       };
       await writeBillingAudit(tx, auditParams);
-      return { invoice: updated, receipt };
+
+      // P1-2: Post-completion price review chat message between secretary and doctor.
+      let reviewMessage: {
+        id: string;
+        fromUserId: string;
+        fromRole: 'DOCTOR' | 'SECRETARY';
+        messageType: 'CUSTOM_TEXT';
+        bodyText: string | null;
+        relatedQueueEntryId: string | null;
+        relatedInvoiceId: string | null;
+        createdAt: Date;
+      } | null = null;
+
+      try {
+        const patient = await tx.patient.findUnique({
+          where: { id: entry.patientId },
+          select: { fullName: true },
+        });
+        const patientName = patient?.fullName ?? `مريض ${entry.patientId.slice(-6)}`;
+        const reviewText = `طلب مراجعة السعر: يرجى كتابة السعر النهائي بعد أي خصم لزيارة ${patientName} (المسجل: ${updated.finalFeeMinor / 100} ج.م)`;
+        const createdMsg = await tx.intercomMessage.create({
+          data: {
+            fromUserId: actor.userId,
+            fromRole: actor.role,
+            messageType: 'CUSTOM_TEXT',
+            bodyText: reviewText,
+            relatedQueueEntryId: entry.id,
+            relatedInvoiceId: updated.id,
+          },
+        });
+        reviewMessage = {
+          id: createdMsg.id,
+          fromUserId: createdMsg.fromUserId,
+          fromRole: createdMsg.fromRole as 'DOCTOR' | 'SECRETARY',
+          messageType: 'CUSTOM_TEXT',
+          bodyText: createdMsg.bodyText,
+          relatedQueueEntryId: createdMsg.relatedQueueEntryId,
+          relatedInvoiceId: createdMsg.relatedInvoiceId,
+          createdAt: createdMsg.createdAt,
+        };
+
+        await writeAudit(tx, {
+          actorUserId: actor.userId,
+          actorRole: actor.role,
+          action: 'INTERCOM_SEND',
+          entityType: 'IntercomMessage',
+          entityId: createdMsg.id,
+          afterState: {
+            type: 'CUSTOM_TEXT',
+            relatedQueueEntryId: entry.id,
+            relatedInvoiceId: updated.id,
+            isPriceReview: true,
+          },
+        });
+      } catch {
+        // Review chat is visibility-only; failures must never block checkout.
+      }
+
+      return { invoice: updated, receipt, reviewMessage };
     });
+
+    if (result.reviewMessage !== null) {
+      broadcastIntercom(toSecretIntercomDto(result.reviewMessage));
+    }
 
     return toSecretCheckoutDto(
       toInvoiceRow(result.invoice),

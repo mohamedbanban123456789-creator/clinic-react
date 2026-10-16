@@ -49,6 +49,18 @@ export const callNextSchema = z
   })
   .strict();
 
+export const deferDocumentationSchema = z
+  .object({
+    reason: z
+      .string({ required_error: 'reason is required', invalid_type_error: 'reason must be a string' })
+      .trim()
+      .min(3, 'reason must be at least 3 characters')
+      .max(300, 'reason must be at most 300 characters'),
+  })
+  .strict();
+
+export type DeferDocumentationInput = z.infer<typeof deferDocumentationSchema>;
+
 export const callSchema = z
   .object({
     outOfOrderReasonCode: reasonCode('outOfOrderReasonCode', 120).optional(),
@@ -159,6 +171,18 @@ export const waitTimesQuerySchema = z
   })
   .strict();
 
+export const createCallRequestSchema = z
+  .object({
+    entryId: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+
+export const callRequestIdParamSchema = z
+  .object({
+    id: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
 export type CheckInInput = z.infer<typeof checkInSchema>;
 export type QueueQuery = z.infer<typeof queueQuerySchema>;
 export type CallNextInput = z.infer<typeof callNextSchema>;
@@ -171,3 +195,5 @@ export type EmergencyToggleInput = z.infer<typeof emergencyToggleSchema>;
 export type WaitTimesQuery = z.infer<typeof waitTimesQuerySchema>;
 export type EmergencyReasonCode = z.infer<typeof emergencyReasonCodeSchema>;
 export type UndoCompleteInput = z.infer<typeof undoCompleteSchema>;
+export type CreateCallRequestInput = z.infer<typeof createCallRequestSchema>;
+

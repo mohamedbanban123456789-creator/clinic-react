@@ -21,6 +21,8 @@ import {
   shiftCloseSchema,
   shiftOpenSchema,
 } from '../src/modules/cashier-shift/shift.validators.js';
+import { closeShift, reopenShift } from '../src/modules/cashier-shift/shift.service.js';
+import { ensureAutoShift } from '../src/modules/cashier-shift/shift.support.js';
 
 // BE-304/305/306 acceptance: new AppError codes carry the contract status.
 {
@@ -281,3 +283,191 @@ import {
   assert.equal(mix.pettyExpenseMinor, 1500, 'expense leg');
   assert.equal(mix.pettyInjectionMinor, 5000, 'injection leg');
 }
+
+// ===========================================================================
+// P1-5 — Free day closing with waiting patients (Secretary can close with reason)
+// ===========================================================================
+{
+  assert.equal(
+    shiftCloseSchema.safeParse({ actualCountedMinor: 50000, reason: '2 waiting patients postponed' }).success,
+    true,
+    'reason accepted in shiftCloseSchema',
+  );
+
+  const fakeShift = {
+    id: 'shift-1',
+    businessDate: new Date('2026-10-15T00:00:00Z'),
+    status: 'OPEN',
+    openingFloatMinor: 10000,
+    queueVersion: 5,
+    actualCountedMinor: null,
+    expectedCashMinor: null,
+    differenceMinor: null,
+    result: null,
+    integrityCheckPassed: null,
+    closedByUserId: null,
+    closedAt: null,
+    closeIdempotencyKey: null,
+    reviewNote: null,
+    reviewedByUserId: null,
+    reviewedAt: null,
+  };
+
+  const auditEvents: Array<Record<string, unknown>> = [];
+
+  const fakeDb = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [],
+    $transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(fakeDb),
+    shift: {
+      findUnique: async () => fakeShift,
+      findUniqueOrThrow: async () => fakeShift,
+      update: async (args: { data: Record<string, unknown> }) => {
+        Object.assign(fakeShift, args.data);
+        return fakeShift;
+      },
+    },
+    queueEntry: {
+      count: async () => 2, // 2 waiting patients!
+      findMany: async () => [],
+    },
+    receipt: {
+      aggregate: async () => ({ _sum: { amountMinor: 0 } }),
+      findMany: async () => [],
+    },
+    pettyExpense: {
+      findMany: async () => [],
+    },
+    invoice: {
+      findMany: async () => [],
+    },
+    auditEvent: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        auditEvents.push(args.data);
+        return args.data;
+      },
+      findMany: async () => [],
+    },
+    clinicSettings: {
+      findUnique: async () => null,
+    },
+  };
+
+  // 1. Secretary closes with 2 waiting patients and NO reason -> rejected with UNPROCESSABLE
+  await assert.rejects(
+    () =>
+      closeShift(
+        'shift-1',
+        { actualCountedMinor: 10000 },
+        { userId: 'u-sec', role: 'SECRETARY' },
+        'idemp-close-1',
+        fakeDb as any,
+      ),
+    (err: unknown) =>
+      err instanceof AppError &&
+      err.code === 'UNPROCESSABLE' &&
+      err.message.includes('2 queue entries are still WAITING or IN_CONSULTATION'),
+    'Closing with open entries and no reason must fail',
+  );
+
+  // 2. Secretary closes with 2 waiting patients AND a reason -> SUCCEEDS!
+  const closeResult = await closeShift(
+    'shift-1',
+    {
+      actualCountedMinor: 10000,
+      reason: 'انتهى الدوام واعتذر المرضى عن الانتظار',
+    },
+    { userId: 'u-sec', role: 'SECRETARY' },
+    'idemp-close-2',
+    fakeDb as any,
+  );
+
+  assert.equal(closeResult.shiftId, 'shift-1');
+  assert.equal(closeResult.status, 'CLOSED');
+  assert.equal(fakeShift.status, 'CLOSED');
+  assert.equal(fakeShift.closedByUserId, 'u-sec');
+  assert.equal(fakeShift.reviewNote, 'انتهى الدوام واعتذر المرضى عن الانتظار');
+
+  // 3. Verify audit trail records the secretary role and reason
+  const closeAudit = auditEvents.find((a) => a.action === 'SHIFT_CLOSE');
+  assert.ok(closeAudit, 'SHIFT_CLOSE audit recorded');
+  assert.equal(closeAudit.actorUserId, 'u-sec');
+  assert.equal(closeAudit.actorRole, 'SECRETARY');
+  assert.equal(closeAudit.reasonText, 'انتهى الدوام واعتذر المرضى عن الانتظار');
+  assert.equal((closeAudit.afterState as Record<string, unknown>).closedWithOpenEntries, true);
+  assert.equal((closeAudit.afterState as Record<string, unknown>).openEntriesCount, 2);
+}
+
+// ---------------------------------------------------------------------------
+// P1-7: Shift system simplification: silent auto-open and day reopen
+// ---------------------------------------------------------------------------
+{
+  let shiftRow: any = null;
+  const auditList: any[] = [];
+
+  const mockDb: any = {
+    shift: {
+      findFirst: async (args: any) => {
+        if (args?.where?.status === 'OPEN') {
+          return shiftRow && shiftRow.status === 'OPEN' ? shiftRow : null;
+        }
+        return shiftRow;
+      },
+      findUnique: async () => shiftRow,
+      create: async (args: any) => {
+        shiftRow = {
+          id: 'shift-auto-1',
+          businessDate: args.data.businessDate,
+          status: 'OPEN',
+          openingFloatMinor: args.data.openingFloatMinor,
+          openingCarryForwardMinor: args.data.openingCarryForwardMinor,
+          openingDiscrepancyMinor: args.data.openingDiscrepancyMinor,
+          queueVersion: 0,
+          openedByUserId: args.data.openedByUserId,
+          createdAt: new Date(),
+        };
+        return shiftRow;
+      },
+      update: async (args: any) => {
+        Object.assign(shiftRow, args.data);
+        return shiftRow;
+      },
+    },
+    user: {
+      findFirst: async () => ({ id: 'u-auto-sec' }),
+    },
+    auditEvent: {
+      create: async (args: any) => {
+        auditList.push(args.data);
+        return args.data;
+      },
+    },
+  };
+
+  // 1. When no open shift exists, ensureAutoShift creates backing shift silently
+  const autoShift = await ensureAutoShift(mockDb, 'u-auto-sec');
+  assert.equal(autoShift.id, 'shift-auto-1');
+  assert.equal(autoShift.status, 'OPEN');
+  assert.equal(shiftRow.status, 'OPEN');
+
+  // 2. Close the shift
+  shiftRow.status = 'CLOSED';
+  shiftRow.closedAt = new Date();
+  shiftRow.closedByUserId = 'u-auto-sec';
+
+  // 3. Reopen the shift freely
+  const reopenResult = await reopenShift('shift-auto-1', { userId: 'u-auto-sec', role: 'SECRETARY' }, mockDb);
+  assert.equal(reopenResult.shiftId, 'shift-auto-1');
+  assert.equal(reopenResult.status, 'OPEN');
+  assert.equal(shiftRow.status, 'OPEN');
+  assert.equal(shiftRow.closedAt, null);
+
+  const reopenAudit = auditList.find((a) => a.action === 'SHIFT_OPEN' && a.entityId === 'shift-auto-1');
+  assert.ok(reopenAudit, 'SHIFT_OPEN audit recorded on reopen');
+  assert.equal(reopenAudit.reasonText, 'إعادة فتح اليوم');
+}
+
+// eslint-disable-next-line no-console
+console.log('shifts-be304: shift lifecycle + closing + P1-7 auto-shift/reopen tests passed.');
+
+

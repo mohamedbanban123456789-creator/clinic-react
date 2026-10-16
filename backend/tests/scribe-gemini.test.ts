@@ -27,12 +27,15 @@ import {
   withdrawConsentSchema,
 } from '../src/modules/ai-scribe/scribe.validators.js';
 import {
+  cancelScribeSession,
   commitScribeSession,
+  deleteScribeSession,
   purgeExpiredScribeAudio,
   purgeScribeAudioFiles,
   runCycle1Consultation,
   runCycle2DoctorDecision,
   startScribeSession,
+  stopScribeSession,
   withdrawConsentScribeSession,
 } from '../src/modules/ai-scribe/scribe.service.js';
 
@@ -178,6 +181,12 @@ function makeFakeDb(state: FakeDbState): PrismaClient {
         if (row === undefined) return Promise.reject(new Error('session not found'));
         return Promise.resolve({ ...row });
       },
+      delete: (args: { where: { id: string } }): Promise<FakeSessionRow> => {
+        const row = state.sessions.get(args.where.id);
+        if (row === undefined) return Promise.reject(new Error('session not found'));
+        state.sessions.delete(args.where.id);
+        return Promise.resolve({ ...row });
+      },
     },
     scribeDraft: {
       create: (args: { data: Record<string, unknown> }): Promise<{ id: string }> => {
@@ -191,6 +200,11 @@ function makeFakeDb(state: FakeDbState): PrismaClient {
           .filter((d) => d['scribeSessionId'] === args.where.scribeSessionId)
           .sort((a, b) => Number(b['version'] ?? 0) - Number(a['version'] ?? 0));
         return Promise.resolve(list[0] ?? null);
+      },
+      deleteMany: (args: { where: { scribeSessionId: string } }): Promise<{ count: number }> => {
+        const before = state.drafts.length;
+        state.drafts = state.drafts.filter((d) => d['scribeSessionId'] !== args.where.scribeSessionId);
+        return Promise.resolve({ count: before - state.drafts.length });
       },
     },
   };
@@ -1000,9 +1014,129 @@ delete process.env['GEMINI_MODEL'];
   assert.equal(analyzes, 3, 'new audio analyzes again');
 }
 
+// ---------------------------------------------------------------------------
+// 18. P1-8: Cancel, stop, and delete pending scribe sessions (committed sessions protected).
+// ---------------------------------------------------------------------------
+{
+  const state = emptyState();
+  const db = makeFakeDb(state);
+
+  // A. Cancel pending session
+  const s1 = await startScribeSession(CONSENTED_START, DOCTOR, db);
+  let purgedAudio = false;
+  const testDeps = {
+    purgeAudioFiles: async () => {
+      purgedAudio = true;
+      return { purgedFiles: ['/tmp/audio1'] };
+    },
+  };
+  const cancelRes = await cancelScribeSession(s1.sessionId, { reason: 'Cancelled by user' }, DOCTOR, testDeps, db);
+  assert.equal(cancelRes.status, 'WITHDRAWN');
+  assert.equal(cancelRes.cancelled, true);
+  assert.equal(purgedAudio, true);
+  assert.ok(
+    state.audits.some((a) => a.action === 'CONSENT_WITHDRAWN' && a.entityId === s1.sessionId),
+    'audit records session cancellation',
+  );
+
+  // B. Stop pending session
+  const s2 = await startScribeSession(CONSENTED_START, DOCTOR, db);
+  const stopRes = await stopScribeSession(s2.sessionId, { reason: 'Doctor stopped recording' }, DOCTOR, db);
+  assert.equal(stopRes.sessionId, s2.sessionId);
+  assert.ok(stopRes.stoppedAt, 'stopRes returns stoppedAt');
+  assert.ok(
+    state.audits.some((a) => a.action === 'CONSENT_WITHDRAWN' && a.entityId === s2.sessionId),
+    'audit records session stop',
+  );
+
+  // C. Delete pending session + drafts
+  const s3 = await startScribeSession(CONSENTED_START, DOCTOR, db);
+  state.drafts.push({ id: 'draft-del-1', scribeSessionId: s3.sessionId });
+  purgedAudio = false;
+  const delRes = await deleteScribeSession(s3.sessionId, { reason: 'Doctor deleted draft' }, DOCTOR, testDeps, db);
+  assert.equal(delRes.deleted, true);
+  assert.equal(state.sessions.has(s3.sessionId), false, 'session row deleted');
+  assert.equal(
+    state.drafts.some((d) => d['scribeSessionId'] === s3.sessionId),
+    false,
+    'session drafts deleted',
+  );
+  assert.ok(
+    state.audits.some((a) => a.action === 'ENCOUNTER_DISCARD' && a.entityId === s3.sessionId),
+    'audit records session deletion',
+  );
+
+  // D. Committed sessions are protected against cancel, stop, and delete
+  const s4 = await startScribeSession(CONSENTED_START, DOCTOR, db);
+  const row4 = state.sessions.get(s4.sessionId)!;
+  row4.status = 'COMMITTED';
+
+  await assert.rejects(
+    () => cancelScribeSession(s4.sessionId, {}, DOCTOR, testDeps, db),
+    (err: AppError) => err.code === 'CONFLICT' && err.statusCode === 409,
+    'committed session cannot be cancelled',
+  );
+
+  await assert.rejects(
+    () => stopScribeSession(s4.sessionId, {}, DOCTOR, db),
+    (err: AppError) => err.code === 'CONFLICT' && err.statusCode === 409,
+    'committed session cannot be stopped',
+  );
+
+  await assert.rejects(
+    () => deleteScribeSession(s4.sessionId, {}, DOCTOR, testDeps, db),
+    (err: AppError) => err.code === 'CONFLICT' && err.statusCode === 409,
+    'committed session cannot be deleted',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 19. P1-9: Scribe cycle failure marks session FAILED, retry recovers without reload.
+// ---------------------------------------------------------------------------
+{
+  const state = emptyState();
+  const db = makeFakeDb(state);
+
+  const started = await startScribeSession(CONSENTED_START, DOCTOR, db);
+
+  const cycle1Json = JSON.stringify({
+    chiefComplaint: 'Follow-up anxiety',
+    symptoms: ['broken sleep'],
+    moodAndAffect: 'Stable',
+    suggestions: ['Keep sleep hygiene'],
+    evidence: [],
+  });
+
+  let shouldFail = true;
+  const stages = {
+    transcribe: async (): Promise<string> => {
+      if (shouldFail) throw new Error('Simulated STT outage');
+      return 'RAW';
+    },
+    cleanup: async () => ({ segments: [{ speaker: 'patient' as const, text: 'x' }], cleanedText: 'المريضة: x' }),
+    analyze: async () => cycle1Json,
+  };
+  const deps = { groqStages: stages, saveAudio: noopSaveAudio };
+
+  // Cycle 1 fails
+  await assert.rejects(
+    () => runCycle1Consultation(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db),
+    /Simulated STT outage/,
+  );
+  assert.equal(state.sessions.get(started.sessionId)!.status, 'FAILED', 'failure marks session FAILED');
+
+  // Retry Cycle 1 recovers
+  shouldFail = false;
+  const c1 = await runCycle1Consultation(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db);
+  assert.equal(c1.sessionId, started.sessionId);
+  assert.equal(state.sessions.get(started.sessionId)!.status, 'TRANSCRIBING', 'retry moves session to TRANSCRIBING');
+}
+
 // Restore key env (do not leak test mutations).
 if (savedKey !== undefined) process.env['GEMINI_API_KEY'] = savedKey;
 if (savedModel !== undefined) process.env['GEMINI_MODEL'] = savedModel;
 
 // eslint-disable-next-line no-console
 console.log('Sprint 6 scribe Gemini 2-cycle foundation green (mocked, no live key).');
+
+

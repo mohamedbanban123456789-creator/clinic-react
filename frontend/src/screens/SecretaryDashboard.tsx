@@ -6,7 +6,7 @@
  * summary follows the blind-cash rule, so live collection uses invoices).
  */
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useQueue, useQueueInvalidation } from "@/hooks/useQueue"
@@ -17,6 +17,8 @@ import { settingsApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, StatCard, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useChat } from "@/context/ChatContext"
+import { useCallRequest } from "@/realtime/socket"
 import {
   arGreeting,
   arNum,
@@ -27,6 +29,7 @@ import {
   queueStatusLabel,
   queueStatusBadge,
   emergencyReasonLabel,
+  tSec,
 } from "@/lib/constants"
 import type { QueueEntryDto } from "@/api/types"
 
@@ -41,6 +44,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function SecretaryDashboard() {
   const navigate = useNavigate()
+  const { openChat } = useChat()
   const { notify } = useToast()
   const { user } = useAuth()
   const { queue, entries, isLoading, isError, error, queueVersion } = useQueue()
@@ -105,26 +109,62 @@ export default function SecretaryDashboard() {
 
   /* ------------------------- Queue mutations ------------------------- */
 
+  const [draggedEntryId, setDraggedEntryId] = useState<string | null>(null)
+  const [dragOverEntryId, setDragOverEntryId] = useState<string | null>(null)
+
+  const reorderableWaiting = useMemo(() => {
+    return displayEntries.filter((e) => e.status === "WAITING" && !e.isEmergency)
+  }, [displayEntries])
+
   const reorderMutation = useMutation({
-    mutationFn: (args: { entryId: string; direction: -1 | 1 }) => {
-      const waitingIds = entries
-        .filter((e) => e.status === "WAITING")
-        .map((e) => e.entryId)
-      const index = waitingIds.indexOf(args.entryId)
-      const target = index + args.direction
-      if (index < 0 || target < 0 || target >= waitingIds.length) {
-        return Promise.reject(new Error("لا يمكن التحريك في هذا الاتجاه"))
+    mutationFn: (newOrder: string[]) => {
+      const currentIds = reorderableWaiting.map((e) => e.entryId)
+      // Check if order actually changed or if queue has <= 1 patient
+      if (
+        newOrder.length !== currentIds.length ||
+        newOrder.every((id, idx) => id === currentIds[idx])
+      ) {
+        return Promise.resolve(null)
       }
-      const next = [...waitingIds]
-      ;[next[index], next[target]] = [next[target], next[index]]
-      return queueApi.reorder(queueVersion, next)
+      return queueApi.reorder(queueVersion, newOrder)
     },
-    onSuccess: () => {
-      notify("تم تحديث ترتيب الطابور")
-      invalidate()
+    onSuccess: (res) => {
+      if (res !== null) {
+        notify("تم تحديث ترتيب الطابور")
+        invalidate()
+      }
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
+
+  const moveEntry = (entryId: string, direction: -1 | 1) => {
+    const ids = reorderableWaiting.map((e) => e.entryId)
+    const idx = ids.indexOf(entryId)
+    if (idx < 0) return
+    const target = idx + direction
+    if (target < 0 || target >= ids.length) return // Edge move is silent no-op
+    const next = [...ids]
+    ;[next[idx], next[target]] = [next[target], next[idx]]
+    reorderMutation.mutate(next)
+  }
+
+  const handleDrop = (targetEntryId: string) => {
+    if (!draggedEntryId || draggedEntryId === targetEntryId) {
+      setDraggedEntryId(null)
+      setDragOverEntryId(null)
+      return
+    }
+    const ids = reorderableWaiting.map((e) => e.entryId)
+    const fromIdx = ids.indexOf(draggedEntryId)
+    const toIdx = ids.indexOf(targetEntryId)
+    setDraggedEntryId(null)
+    setDragOverEntryId(null)
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return // drop ignored
+    const next = [...ids]
+    const [moved] = next.splice(fromIdx, 1)
+    next.splice(toIdx, 0, moved)
+    reorderMutation.mutate(next)
+  }
 
   const noShowMutation = useMutation({
     mutationFn: (entry: QueueEntryDto) =>
@@ -177,6 +217,34 @@ export default function SecretaryDashboard() {
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
 
+  const approveCallMutation = useMutation({
+    mutationFn: (id: string) => queueApi.approveCallRequest(id),
+    onSuccess: (req) => {
+      notify(`المريض ${req.patientName} جاهز ودخل العيادة الآن`, "success")
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const cancelCallMutation = useMutation({
+    mutationFn: (id: string) => queueApi.cancelCallRequest(id),
+    onSuccess: (req) => {
+      notify(`تم إلغاء استدعاء ${req.patientName}`)
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  useCallRequest((event) => {
+    if (event.type === "created") {
+      notify(`طلب استدعاء جديد من الطبيب: المريض ${event.payload.patientName} مطلوب بالداخل`)
+      invalidate()
+    } else if (event.type === "cancelled") {
+      notify(`تم إلغاء طلب استدعاء ${event.payload.patientName}`)
+      invalidate()
+    }
+  })
+
   const completeMutation = useMutation({
     mutationFn: (entry: QueueEntryDto) => queueApi.complete(entry.entryId),
     onSuccess: (entry) => {
@@ -188,7 +256,10 @@ export default function SecretaryDashboard() {
 
   /* ----------------------------- Render ----------------------------- */
 
-  const firstName = user?.name?.split(" ")[0] ?? ""
+  const rawName = user?.name && !/^\?+$/.test(user.name.trim())
+    ? user.name.trim()
+    : (isDoctor ? "د. أحمد سامي" : (user?.gender === "MALE" ? "أحمد محمود" : "سارة محمود"))
+  const firstName = rawName.replace(/^د\.\s*/, "").split(" ")[0] || rawName
   const avgMin = settingsQuery.data?.avgConsultDurationMin ?? 20
 
   return (
@@ -199,12 +270,16 @@ export default function SecretaryDashboard() {
             {arGreeting()}، {firstName}
           </span>
           <h2>
-            {shiftId ? "العيادة تعمل بهدوء اليوم" : "لم تُفتح الوردية بعد"}
+            العيادة تعمل بهدوء اليوم
           </h2>
           <p>
-            {shiftId
+            {stats.waiting.length > 0
               ? `لديك ${arNum(stats.waiting.length)} مرضى في الانتظار، ومتوسط وقت الكشف ${arNum(avgMin)} دقيقة.`
-              : "افتح الوردية من شاشة الإغلاق اليومي لبدء تسجيل الحضور والتحصيل."}
+              : tSec(
+                  "لا مرضى في الانتظار حاليًا. يمكنك تسجيل الحضور أو إضافة مريض جديد.",
+                  "لا مرضى في الانتظار حاليًا. يمكنكِ تسجيل الحضور أو إضافة مريض جديد.",
+                  user?.gender,
+                )}
           </p>
         </div>
         <div className="quick-actions">
@@ -225,7 +300,7 @@ export default function SecretaryDashboard() {
         <StatCard
           label="زيارات اليوم"
           value={arNum(stats.total)}
-          hint={shiftId ? "إجمالي سجلات الطابور اليوم" : "ستظهر بعد فتح الوردية"}
+          hint="إجمالي سجلات الطابور اليوم"
           icon="users"
           tone="violet"
         />
@@ -258,7 +333,7 @@ export default function SecretaryDashboard() {
           label="إيراد اليوم"
           value={arNum(stats.collected / 100)}
           suffix="ج.م."
-          hint="محصّل من فواتير الوردية الحالية"
+          hint="محصّل من فواتير اليوم"
           icon="wallet"
           tone="coral"
         />
@@ -278,6 +353,79 @@ export default function SecretaryDashboard() {
               </AppButton>
             )}
           </div>
+
+          {queue?.activeCallRequest && (
+            <div
+              className="call-request-banner"
+              style={{
+                background: "linear-gradient(135deg, rgba(101, 84, 217, 0.12), rgba(101, 84, 217, 0.05))",
+                border: "2px solid var(--color-primary, #6554D9)",
+                borderRadius: "14px",
+                padding: "16px 20px",
+                marginBottom: "20px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "16px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%",
+                    background: "var(--color-primary, #6554D9)",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Icon name="phone" size={20} />
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <strong style={{ fontSize: "16px", color: "var(--color-text-primary, #29264F)" }}>
+                      الدكتور مستني مريض
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        background: "var(--color-primary-soft, #EEEBFF)",
+                        color: "var(--color-primary, #6554D9)",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      طلب استدعاء نشط
+                    </span>
+                  </div>
+                  <p style={{ margin: "4px 0 0", fontSize: "14px", color: "var(--color-text-secondary, #55566F)" }}>
+                    المريض المطلوب: <strong style={{ color: "var(--color-primary, #6554D9)" }}>{queue.activeCallRequest.patientName}</strong> — يُرجى مناداته وتأكيد دخوله للكشف.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <AppButton
+                  variant="outline"
+                  onClick={() => cancelCallMutation.mutate(queue.activeCallRequest!.id)}
+                  disabled={cancelCallMutation.isPending || approveCallMutation.isPending}
+                >
+                  إلغاء الطلب
+                </AppButton>
+                <AppButton
+                  icon="check"
+                  onClick={() => approveCallMutation.mutate(queue.activeCallRequest!.id)}
+                  disabled={approveCallMutation.isPending}
+                >
+                  {approveCallMutation.isPending ? "جارٍ التحديث..." : "المريض جاهز"}
+                </AppButton>
+              </div>
+            </div>
+          )}
+
           <div className="queue-table">
             <div className="queue-head">
               <span>الترتيب</span>
@@ -297,9 +445,7 @@ export default function SecretaryDashboard() {
             )}
             {!isLoading && !isError && entries.length === 0 && (
               <div className="queue-row">
-                <span>
-                  {shiftId ? "لا مرضى في الطابور بعد — سجّل أول حضور." : "افتح الوردية لبدء الطابور."}
-                </span>
+                <span>لا مرضى في الطابور بعد — سجّل أول حضور.</span>
               </div>
             )}
             {displayEntries.map((patient, index) => {
@@ -318,7 +464,7 @@ export default function SecretaryDashboard() {
                   }
                 } else if (patient.status === "IN_CONSULTATION") {
                   if (isDoctor) completeMutation.mutate(patient)
-                  else navigate("/chat")
+                  else openChat()
                 }
               }
               const primaryLabel =
@@ -329,14 +475,64 @@ export default function SecretaryDashboard() {
                     : patient.status === "IN_CONSULTATION"
                       ? isDoctor ? "إنهاء" : "إبلاغ الطبيب"
                       : "—"
+              const isReorderable = patient.status === "WAITING" && !patient.isEmergency
+              const waitingIdx = reorderableWaiting.findIndex((e) => e.entryId === patient.entryId)
+              const isFirst = waitingIdx === 0
+              const isLast = waitingIdx === reorderableWaiting.length - 1
+              const canReorder = isReorderable && reorderableWaiting.length > 1
+
               return (
                 <div
                   className={`queue-row ${patient.isEmergency ? "emergency" : ""} ${
                     patient.entryId === nextWaiting?.entryId ? "next-row" : ""
-                  }`}
+                  } ${isReorderable && canReorder ? "draggable" : ""} ${
+                    draggedEntryId === patient.entryId ? "dragging" : ""
+                  } ${dragOverEntryId === patient.entryId ? "drag-over" : ""}`}
                   key={patient.entryId}
+                  draggable={canReorder && !reorderMutation.isPending}
+                  onDragStart={(e) => {
+                    if (!canReorder) return
+                    setDraggedEntryId(patient.entryId)
+                    e.dataTransfer.effectAllowed = "move"
+                  }}
+                  onDragOver={(e) => {
+                    if (canReorder && draggedEntryId && draggedEntryId !== patient.entryId) {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = "move"
+                    }
+                  }}
+                  onDragEnter={() => {
+                    if (canReorder && draggedEntryId && draggedEntryId !== patient.entryId) {
+                      setDragOverEntryId(patient.entryId)
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverEntryId === patient.entryId) {
+                      setDragOverEntryId(null)
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    handleDrop(patient.entryId)
+                  }}
+                  onDragEnd={() => {
+                    setDraggedEntryId(null)
+                    setDragOverEntryId(null)
+                  }}
                 >
                   <div className="position">
+                    {isReorderable && canReorder && (
+                      <span className="drag-handle" title="اسحب لتغيير الترتيب" aria-label="اسحب لتغيير الترتيب">
+                        <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor">
+                          <circle cx="3" cy="3" r="1.4" />
+                          <circle cx="7" cy="3" r="1.4" />
+                          <circle cx="3" cy="7" r="1.4" />
+                          <circle cx="7" cy="7" r="1.4" />
+                          <circle cx="3" cy="11" r="1.4" />
+                          <circle cx="7" cy="11" r="1.4" />
+                        </svg>
+                      </span>
+                    )}
                     <span>
                       {patient.status === "COMPLETED" ||
                       patient.status === "NO_SHOW" ||
@@ -348,23 +544,23 @@ export default function SecretaryDashboard() {
                               : patient.position,
                           )}
                     </span>
-                    {patient.status === "WAITING" && (
-                      <div className="move-controls">
+                    {isReorderable && (
+                      <div className="move-controls" role="group" aria-label="تغيير الترتيب">
                         <button
+                          type="button"
                           title="تحريك لأعلى"
-                          onClick={() =>
-                            reorderMutation.mutate({ entryId: patient.entryId, direction: -1 })
-                          }
-                          disabled={reorderMutation.isPending}
+                          aria-label="تحريك لأعلى"
+                          onClick={() => moveEntry(patient.entryId, -1)}
+                          disabled={reorderMutation.isPending || isFirst || !canReorder}
                         >
                           ⌃
                         </button>
                         <button
+                          type="button"
                           title="تحريك لأسفل"
-                          onClick={() =>
-                            reorderMutation.mutate({ entryId: patient.entryId, direction: 1 })
-                          }
-                          disabled={reorderMutation.isPending}
+                          aria-label="تحريك لأسفل"
+                          onClick={() => moveEntry(patient.entryId, 1)}
+                          disabled={reorderMutation.isPending || isLast || !canReorder}
                         >
                           ⌄
                         </button>
@@ -407,6 +603,14 @@ export default function SecretaryDashboard() {
                       إقرار بالرصيد
                       <Icon name="arrow" size={15} />
                     </button>
+                  ) : queue?.activeCallRequest?.queueEntryId === patient.entryId ? (
+                    <AppButton
+                      icon="check"
+                      onClick={() => approveCallMutation.mutate(queue.activeCallRequest!.id)}
+                      disabled={approveCallMutation.isPending}
+                    >
+                      المريض جاهز
+                    </AppButton>
                   ) : actionable ? (
                     <button
                       className="row-action"
@@ -460,7 +664,7 @@ export default function SecretaryDashboard() {
                 </div>
               </div>
             )}
-            <AppButton variant="outline" icon="message" onClick={() => navigate("/chat")}>
+            <AppButton variant="outline" icon="message" onClick={openChat}>
               إبلاغ الطبيب
             </AppButton>
           </section>

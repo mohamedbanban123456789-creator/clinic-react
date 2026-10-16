@@ -17,6 +17,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { useAuth } from "@/auth/AuthContext"
 import { supervisionApi, auditApi } from "@/api/admin"
 import { shiftsApi } from "@/api/shifts"
 import { apiErrorMessage } from "@/api/client"
@@ -29,6 +30,8 @@ const teal = "#0d9488"
 const blue = "#56a8e8"
 
 export default function ReportsScreen() {
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
   const { notify } = useToast()
   const [tab, setTab] = useState<"cash" | "shifts" | "exceptions" | "audit">("cash")
 
@@ -39,18 +42,22 @@ export default function ReportsScreen() {
   const shiftsHistoryQuery = useQuery({
     queryKey: ["supervision", "shifts"],
     queryFn: () => supervisionApi.shifts({ limit: 30 }),
+    enabled: isDoctor,
   })
   const exceptionsQuery = useQuery({
     queryKey: ["supervision", "exceptions"],
     queryFn: () => supervisionApi.exceptions(),
+    enabled: isDoctor,
   })
   const unsignedQuery = useQuery({
     queryKey: ["supervision", "unsigned-notes"],
     queryFn: () => supervisionApi.unsignedNotes(),
+    enabled: isDoctor,
   })
   const auditQuery = useQuery({
     queryKey: ["audit", "recent"],
     queryFn: () => auditApi.list({ limit: 100 }),
+    enabled: isDoctor,
   })
 
   // Cash summary for the most recent CLOSED shift.
@@ -61,12 +68,12 @@ export default function ReportsScreen() {
   const cashSummaryQuery = useQuery({
     queryKey: ["supervision", "cash-summary", latestClosed?.shiftId ?? "none"],
     queryFn: () => supervisionApi.cashSummary(latestClosed!.shiftId),
-    enabled: Boolean(latestClosed),
+    enabled: Boolean(isDoctor && latestClosed),
   })
   const discountsQuery = useQuery({
     queryKey: ["supervision", "discounts", latestClosed?.shiftId ?? "none"],
     queryFn: () => supervisionApi.discounts(latestClosed!.shiftId!),
-    enabled: Boolean(latestClosed),
+    enabled: Boolean(isDoctor && latestClosed),
   })
 
   const cash = cashSummaryQuery.data
@@ -114,7 +121,7 @@ export default function ReportsScreen() {
           ملخص الخزينة
         </button>
         <button className={tab === "shifts" ? "active" : ""} onClick={() => setTab("shifts")}>
-          سجل الورديبات
+          سجل الورديات
         </button>
         <button className={tab === "exceptions" ? "active" : ""} onClick={() => setTab("exceptions")}>
           الاستثناءات
@@ -240,7 +247,7 @@ export default function ReportsScreen() {
                     </div>
                     {(discountsQuery.data?.data ?? []).map((d) => (
                       <div className="data-row" key={d.invoiceId} style={{ cursor: "default" }}>
-                        <strong>{d.invoiceId.slice(-8).toUpperCase()}</strong>
+                        <strong>{d.invoiceId.slice(-6).toUpperCase()}</strong>
                         <span>{moneyMinor(d.standardFeeMinor)}</span>
                         <span>{moneyMinor(d.finalFeeMinor)}</span>
                         <span className="due-text">{moneyMinor(d.discountMinor)}</span>
@@ -262,7 +269,7 @@ export default function ReportsScreen() {
         <section className="card archive-card">
           <div className="card-header">
             <div>
-              <span className="section-kicker">سجل الورديبات</span>
+              <span className="section-kicker">سجل الورديات</span>
               <h3>آخر {arNum(closedShifts.length)} وردية مقفلة</h3>
             </div>
           </div>

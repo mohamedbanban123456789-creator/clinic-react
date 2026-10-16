@@ -55,7 +55,22 @@ export const soapCompleteSchema = z
   })
   .strict();
 
-const diagnosisItem = z.string().trim().min(1).max(200);
+export const structuredDiagnosisSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Diagnosis name is required').max(200),
+    code: z.string().trim().max(30).optional(),
+    type: z.enum(['PRIMARY', 'SECONDARY', 'DIFFERENTIAL']).optional(),
+    notes: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export const diagnosisItemSchema = z.union([
+  z.string().trim().min(1).max(200),
+  structuredDiagnosisSchema,
+]);
+
+export type StructuredDiagnosis = z.infer<typeof structuredDiagnosisSchema>;
+export type DiagnosisItem = z.infer<typeof diagnosisItemSchema>;
 
 function isValidDateString(v: string): boolean {
   const t = Date.parse(v);
@@ -79,7 +94,8 @@ export const createEncounterSchema = z
     queueEntryId: idText('queueEntryId').optional(),
     soap: soapPartialSchema.optional(),
     mse: mseObjectSchema,
-    diagnoses: z.array(diagnosisItem).max(20).optional(),
+    diagnoses: z.array(diagnosisItemSchema).max(20).optional(),
+    diagnosisNotes: z.string().trim().max(5000).optional(),
   })
   .strict();
 
@@ -90,7 +106,8 @@ export const patchEncounterSchema = z
     encounterType: z.string().trim().min(1).max(64).optional(),
     soap: soapPartialSchema.optional(),
     mse: msePatchSchema.optional(),
-    diagnoses: z.array(diagnosisItem).max(20).optional(),
+    diagnoses: z.array(diagnosisItemSchema).max(20).optional(),
+    diagnosisNotes: z.string().trim().max(5000).nullable().optional(),
   })
   .strict()
   .superRefine((val, ctx) => {
@@ -99,7 +116,8 @@ export const patchEncounterSchema = z
       val.encounterType === undefined &&
       val.soap === undefined &&
       val.mse === undefined &&
-      val.diagnoses === undefined
+      val.diagnoses === undefined &&
+      val.diagnosisNotes === undefined
     ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'at least one field must be provided' });
     }

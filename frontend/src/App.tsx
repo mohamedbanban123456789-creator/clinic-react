@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AuthProvider, useAuth } from "@/auth/AuthContext"
 import { RealtimeProvider } from "@/realtime/socket"
 import { ToastProvider, useToast } from "@/components/ui"
+import { ChatProvider } from "@/context/ChatContext"
 import { AppShell } from "@/components/layout"
 import { routeTitle } from "@/lib/constants"
 
@@ -99,6 +100,14 @@ function RequireDoctor({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequireSecretary({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth()
+  if (user?.role === "DOCTOR") {
+    return <Navigate to="/doctor" replace />
+  }
+  return <>{children}</>
+}
+
 function HomeRedirect() {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
@@ -111,7 +120,8 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <RealtimeProvider>
-            <Routes>
+            <ChatProvider>
+              <Routes>
               <Route path="/login" element={<LoginScreen />} />
               <Route
                 path="/change-password"
@@ -125,9 +135,11 @@ export default function App() {
                 path="/secretary"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <SecretaryDashboard />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <SecretaryDashboard />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -135,9 +147,11 @@ export default function App() {
                 path="/secretary/checkin"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <CheckInScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <CheckInScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -145,9 +159,11 @@ export default function App() {
                 path="/secretary/payments"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <PaymentsScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <PaymentsScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -155,9 +171,11 @@ export default function App() {
                 path="/secretary/receipts"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ReceiptsScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <ReceiptsScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -165,9 +183,11 @@ export default function App() {
                 path="/secretary/closing"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ClosingScreen />
-                    </ShellRoute>
+                    <RequireSecretary>
+                      <ShellRoute>
+                        <ClosingScreen />
+                      </ShellRoute>
+                    </RequireSecretary>
                   </RequireAuth>
                 }
               />
@@ -175,9 +195,7 @@ export default function App() {
                 path="/chat"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ChatScreen />
-                    </ShellRoute>
+                    <Navigate to="/" replace />
                   </RequireAuth>
                 }
               />
@@ -300,6 +318,7 @@ export default function App() {
               <Route path="/" element={<HomeRedirect />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </ChatProvider>
           </RealtimeProvider>
         </AuthProvider>
       </ToastProvider>

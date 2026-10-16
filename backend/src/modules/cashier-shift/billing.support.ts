@@ -23,12 +23,19 @@ export async function lockPatient(tx: PrismaTx, patientId: string): Promise<void
   await tx.$queryRaw`SELECT id FROM patients WHERE id = ${patientId} FOR UPDATE`;
 }
 
+import { ensureAutoShift } from './shift.support.js';
+
 /** Load the OPEN shift or throw 409 NO_OPEN_SHIFT. */
 export async function getOpenShiftOrThrow(
   db: PrismaTx | PrismaClient,
 ): Promise<{ id: string; queueVersion: number }> {
   const shift = await db.shift.findFirst({ where: { status: 'OPEN' }, select: { id: true, queueVersion: true } });
   if (shift === null) {
+    const env = loadEnv();
+    if (!env.SHIFT_SYSTEM_ENABLED) {
+      const auto = await ensureAutoShift(db);
+      return { id: auto.id, queueVersion: auto.queueVersion };
+    }
     throw new AppError('NO_OPEN_SHIFT', 'No open shift');
   }
   return { id: shift.id, queueVersion: shift.queueVersion };
@@ -247,34 +254,17 @@ export async function writeBillingAuditStandalone(
 
 /**
  * DB-09 secretary discount floor. "Tighter of absolute + pct wins": a SECRETARY
- * may discount at most min(secretaryMaxDiscountMinor, standard*pct/100). Exceeds
- * -> 403 FLOOR_VIOLATION per API-08/API_CONTRACTS (DOCTOR bypasses the floor
- * entirely). The 422 DISCOUNT_BELOW_FLOOR code remains in the catalogue for
- * supervision mapping of historical audit rows but is no longer thrown.
- *
- * NOTE: DB-09 (the cited authority) defines secretaryMaxDiscountPct as the max
- * DISCOUNT percentage, i.e. discount > standard*pct/100 breaches. This is the
- * stricter, spec-correct reading (the ticket's literal `final < standard*pct/100`
- * would invert the cap); we follow DB-09.
+ * P1-1: Ceiling enforcement for the SECRETARY role has been removed.
+ * The secretary may enter ANY discount value with a mandatory reason.
+ * The doctor path is unchanged. Settings fields remain in DB, but the cap is no longer enforced.
  */
 export function assertSecretaryDiscountFloor(
-  actorRole: 'DOCTOR' | 'SECRETARY',
-  standardFeeMinor: number,
-  finalFeeMinor: number,
-  fees: ClinicFees,
+  _actorRole: 'DOCTOR' | 'SECRETARY',
+  _standardFeeMinor: number,
+  _finalFeeMinor: number,
+  _fees: ClinicFees,
 ): void {
-  if (actorRole !== 'SECRETARY') return;
-  const discountMinor = standardFeeMinor - finalFeeMinor;
-  if (discountMinor <= 0) return;
-  const pctCap = Math.floor((standardFeeMinor * fees.secretaryMaxDiscountPct) / 100);
-  const allowedDiscount = Math.min(fees.secretaryMaxDiscountMinor, pctCap);
-  if (discountMinor > allowedDiscount) {
-    throw new AppError('FLOOR_VIOLATION', 'Discount exceeds the secretary floor; a doctor must authorize', [
-      {
-        field: 'finalFeeMinor',
-        issue: `discount ${discountMinor} exceeds allowed ${allowedDiscount}`,
-        expected: `finalFeeMinor >= ${standardFeeMinor - allowedDiscount}`,
-      },
-    ]);
-  }
+  // P1-1: Secretary discount cap removed per business rule change.
+  // Any discount value is permitted; mandatory reason (10-300 chars) is validated at checkout/update.
+  return;
 }

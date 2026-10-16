@@ -12,12 +12,18 @@ export function normalizeQueueStatus(status: QueueStatus): QueueEntryStatus {
   return status as QueueEntryStatus;
 }
 
+import { ensureAutoShift } from '../cashier-shift/shift.support.js';
+
 /** Load the OPEN shift or throw 409 NO_OPEN_SHIFT. */
 export async function getOpenShiftOrThrow(
   prisma: PrismaTx | PrismaClient,
 ): Promise<{ id: string; queueVersion: number; status: string }> {
   const shift = await prisma.shift.findFirst({ where: { status: 'OPEN' } });
   if (shift === null) {
+    const env = loadEnv();
+    if (!env.SHIFT_SYSTEM_ENABLED) {
+      return await ensureAutoShift(prisma);
+    }
     throw new AppError('NO_OPEN_SHIFT', 'No open shift');
   }
   return { id: shift.id, queueVersion: shift.queueVersion, status: shift.status };
@@ -76,7 +82,7 @@ export async function loadOrderedWaitingPool(prisma: PrismaTx | PrismaClient, sh
 
 /** Estimated wait in minutes for a given dense position. */
 export function estimateWaitMin(position: number, avgConsultMin: number): number {
-  return Math.max(0, position - 1) * avgConsultMin;
+  return Math.round(Math.max(0, position - 1) * avgConsultMin);
 }
 
 /** Aggregate outstanding debt for a patient across UNPAID/PARTIAL invoices. */
@@ -234,6 +240,6 @@ export function computeEstimatedWaitMin(params: {
   const remainder = params.inConsultation
     ? Math.max(0, params.avgConsultDurationMin - Math.max(0, params.elapsedConsultMin))
     : 0;
-  return base + remainder;
+  return Math.round(base + remainder);
 }
 

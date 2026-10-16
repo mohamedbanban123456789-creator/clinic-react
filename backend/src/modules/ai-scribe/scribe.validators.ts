@@ -102,9 +102,34 @@ export const withdrawConsentSchema = z
   .strict()
   .default({});
 
+export const cancelSessionSchema = z
+  .object({
+    reason: trimmedReason('reason', 1, 300).optional(),
+  })
+  .strict()
+  .default({});
+
+export const stopSessionSchema = z
+  .object({
+    reason: trimmedReason('reason', 1, 300).optional(),
+  })
+  .strict()
+  .default({});
+
+export const deleteSessionSchema = z
+  .object({
+    reason: trimmedReason('reason', 1, 300).optional(),
+  })
+  .strict()
+  .default({});
+
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type AudioUploadInput = z.infer<typeof audioUploadSchema>;
 export type CommitSessionInput = z.infer<typeof commitSessionSchema>;
 export type WithdrawConsentInput = z.infer<typeof withdrawConsentSchema>;
+export type CancelSessionInput = z.infer<typeof cancelSessionSchema>;
+export type StopSessionInput = z.infer<typeof stopSessionSchema>;
+export type DeleteSessionInput = z.infer<typeof deleteSessionSchema>;
 export type ScribeSoap = z.infer<typeof scribeSoapSchema>;
 export type ScribePrescription = z.infer<typeof scribePrescriptionSchema>;
+

@@ -23,21 +23,24 @@ import { arNum, arDate, moneyMinor, minorToMajor } from "@/lib/format"
 import { paymentMethods } from "@/lib/constants"
 import type { CheckoutDto, InvoiceListItemDto, PatientDto } from "@/api/types"
 import { useAuth } from "@/auth/AuthContext"
+import { Conversation } from "@/components/Conversation"
 
 function ReceiptModal({
   checkout,
   patient,
   onClose,
+  onOpenChat,
 }: {
   checkout: CheckoutDto
   patient: PatientDto | null
   onClose: () => void
+  onOpenChat?: () => void
 }) {
   const paidFull = checkout.outstandingMinor === 0
   return (
     <Modal
       title="تفاصيل الإيصال"
-      subtitle={`مرجع ${checkout.receiptId?.slice(-8).toUpperCase() ?? ""}`}
+      subtitle={`مرجع ${checkout.receiptId?.slice(-6).toUpperCase() ?? ""}`}
       onClose={onClose}
     >
       <div className="receipt-paper">
@@ -102,6 +105,11 @@ function ReceiptModal({
         <AppButton variant="outline" onClick={onClose}>
           إغلاق
         </AppButton>
+        {onOpenChat && (
+          <AppButton variant="secondary" icon="message" onClick={onOpenChat}>
+            مراجعة السعر في المحادثة
+          </AppButton>
+        )}
         <AppButton icon="receipt" onClick={() => window.print()}>
           طباعة الإيصال
         </AppButton>
@@ -152,6 +160,7 @@ export default function PaymentsScreen() {
   const [paid, setPaid] = useState(0)
   const [method, setMethod] = useState<string>("cash")
   const [receipt, setReceipt] = useState<CheckoutDto | null>(null)
+  const [showReviewChat, setShowReviewChat] = useState(false)
   const [showSettle, setShowSettle] = useState(false)
   const [settleAmount, setSettleAmount] = useState(0)
 
@@ -208,7 +217,8 @@ export default function PaymentsScreen() {
     },
     onSuccess: (checkout) => {
       setReceipt(checkout)
-      notify("تم تسجيل الدفعة وإنشاء الإيصال")
+      setShowReviewChat(true)
+      notify("تم تسجيل الدفعة وإنشاء الإيصال — جرى فتح محادثة مراجعة السعر مع الطبيب")
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["queue"] })
     },
@@ -234,15 +244,6 @@ export default function PaymentsScreen() {
   const total = Math.max(0, fee - discount)
   const remaining = Math.max(0, total - paid)
   const standard = minorToMajor(settingsQuery.data?.standardFeeMinor ?? 0)
-  const floorMinor = isDoctor
-    ? Infinity
-    : Math.min(
-        settingsQuery.data?.secretaryMaxDiscountMinor ?? 0,
-        Math.floor(((settingsQuery.data?.standardFeeMinor ?? 0) *
-          (settingsQuery.data?.secretaryMaxDiscountPct ?? 0)) / 100),
-      )
-  const floor = minorToMajor(floorMinor === Infinity ? Number.MAX_SAFE_INTEGER : floorMinor)
-  const discountExceedsFloor = !isDoctor && discount > floor
   const discountReasonRequired = discount > 0 && discountReason.trim().length < 10
   const outstanding = balanceQuery.data?.outstandingMinor ?? 0
 
@@ -253,23 +254,6 @@ export default function PaymentsScreen() {
       ),
     [openInvoicesQuery.invoices],
   )
-
-  if (!shiftId) {
-    return (
-      <section className="card form-card">
-        <div className="step-header">
-          <span className="step-no">!</span>
-          <div>
-            <h2>لا توجد وردية مفتوحة</h2>
-            <p>يتعذر التحصيل قبل فتح الوردية — افتحها من شاشة الإغلاق اليومي.</p>
-          </div>
-        </div>
-        <AppButton icon="chart" onClick={() => navigate("/secretary/closing")}>
-          الانتقال إلى الإغلاق اليومي
-        </AppButton>
-      </section>
-    )
-  }
 
   return (
     <div className="payment-layout">
@@ -297,7 +281,7 @@ export default function PaymentsScreen() {
           <div className="form-section">
             <h3>زيارات بانتظار التحصيل</h3>
             {selectableInvoices.length === 0 && (
-              <p>لا توجد فواتير غير مدفوعة في هذه الوردية.</p>
+              <p>لا توجد فواتير غير مدفوعة اليوم.</p>
             )}
             <div className="data-table">
               {selectableInvoices.map((inv) => (
@@ -339,7 +323,7 @@ export default function PaymentsScreen() {
                 <label className="field">
                   <span>نوع الزيارة</span>
                   <select defaultValue="visit">
-                    <option value="visit">زيارة في الوردية الحالية</option>
+                    <option value="visit">زيارة اليوم</option>
                   </select>
                 </label>
                 <label className="field money-field">
@@ -352,9 +336,7 @@ export default function PaymentsScreen() {
                   <i>ج.م.</i>
                 </label>
                 <label className="field money-field">
-                  <span>
-                    الخصم {!isDoctor && floor < Number.MAX_SAFE_INTEGER ? `(حدك ${arNum(floor)} ج.م.)` : ""}
-                  </span>
+                  <span>الخصم</span>
                   <input
                     type="number"
                     value={discount}
@@ -375,11 +357,6 @@ export default function PaymentsScreen() {
                   />
                   <small>مطلوب عند تخفيض قيمة الكشف الافتراضية (١٠ أحرف على الأقل).</small>
                 </label>
-              )}
-              {discountExceedsFloor && (
-                <p className="field-error">
-                  الخصم يتجاوز الحد المسموح لمسؤولة الاستقبال — اطلب من الطبيب إجراء التعديل.
-                </p>
               )}
             </div>
             <div className="form-section">
@@ -452,7 +429,6 @@ export default function PaymentsScreen() {
               onClick={() => checkoutMutation.mutate()}
               disabled={
                 checkoutMutation.isPending ||
-                discountExceedsFloor ||
                 discountReasonRequired ||
                 paid < 0 ||
                 paid > total
@@ -478,6 +454,7 @@ export default function PaymentsScreen() {
           checkout={receipt}
           patient={patientQuery.data ?? null}
           onClose={() => setReceipt(null)}
+          onOpenChat={() => setShowReviewChat(true)}
         />
       )}
 
@@ -517,6 +494,21 @@ export default function PaymentsScreen() {
               </AppButton>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {showReviewChat && (
+        <Modal
+          title="مراجعة السعر مع الطبيب"
+          subtitle="محادثة مراجعة السعر النهائي بعد الخصم (للتوثيق الداخلي فقط)"
+          onClose={() => setShowReviewChat(false)}
+        >
+          <Conversation expanded onComplimentary={() => {}} />
+          <div className="modal-actions" style={{ marginTop: "12px" }}>
+            <AppButton variant="secondary" onClick={() => setShowReviewChat(false)}>
+              إغلاق المحادثة
+            </AppButton>
+          </div>
         </Modal>
       )}
     </div>

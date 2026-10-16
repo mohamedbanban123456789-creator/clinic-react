@@ -29,8 +29,11 @@ import { CYCLE_1_ANALYSIS_PROMPT, CYCLE_2_SYNTHESIS_PROMPT } from './prompts/scr
 import { purgeScribeAudio, saveScribeAudio } from './audio.store.js';
 import type {
   AudioUploadInput,
+  CancelSessionInput,
   CommitSessionInput,
   CreateSessionInput,
+  DeleteSessionInput,
+  StopSessionInput,
   WithdrawConsentInput,
 } from './scribe.validators.js';
 
@@ -323,45 +326,53 @@ export async function runCycle1Consultation(
 
   let analysis: Cycle1Analysis;
   let transcript: StoredTranscript | null = prior.transcript;
-  if (useGroqPipeline(deps)) {
-    // Groq 3-stage path: transcribe -> cleanup/diarize -> analyze cleaned.
-    const stages = deps.groqStages;
-    const audioInput = {
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-    };
-    const raw =
-      stages !== undefined
-        ? await stages.transcribe(audioInput)
-        : await transcribeAudio(audioInput);
-    const ctx = await cleanupContext(db, session);
-    const cleaned =
-      stages !== undefined
-        ? await stages.cleanup(raw, ctx)
-        : await cleanupTranscript(raw, ctx);
-    const rawJson =
-      stages !== undefined
-        ? await stages.analyze({ systemPrompt: CYCLE_1_ANALYSIS_PROMPT, cleanedText: cleaned.cleanedText })
-        : await analyzeCleanedTranscript({
-            systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
-            cleanedText: cleaned.cleanedText,
-          });
-    analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
-    transcript = {
-      raw,
-      cleaned: cleaned.cleanedText,
-      segments: cleaned.segments,
-      cleanedAt: new Date().toISOString(),
-      model: resolveGroqConfig().chatModel,
-      audioHash: sha256Hex(input.audioBase64),
-    };
-  } else {
-    const generate = deps.generateContent;
-    analysis = await analyzeConsultationAudio({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      ...(generate !== undefined ? { generateContent: generate } : {}),
-    });
+  try {
+    if (useGroqPipeline(deps)) {
+      // Groq 3-stage path: transcribe -> cleanup/diarize -> analyze cleaned.
+      const stages = deps.groqStages;
+      const audioInput = {
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      };
+      const raw =
+        stages !== undefined
+          ? await stages.transcribe(audioInput)
+          : await transcribeAudio(audioInput);
+      const ctx = await cleanupContext(db, session);
+      const cleaned =
+        stages !== undefined
+          ? await stages.cleanup(raw, ctx)
+          : await cleanupTranscript(raw, ctx);
+      const rawJson =
+        stages !== undefined
+          ? await stages.analyze({ systemPrompt: CYCLE_1_ANALYSIS_PROMPT, cleanedText: cleaned.cleanedText })
+          : await analyzeCleanedTranscript({
+              systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
+              cleanedText: cleaned.cleanedText,
+            });
+      analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
+      transcript = {
+        raw,
+        cleaned: cleaned.cleanedText,
+        segments: cleaned.segments,
+        cleanedAt: new Date().toISOString(),
+        model: resolveGroqConfig().chatModel,
+        audioHash: sha256Hex(input.audioBase64),
+      };
+    } else {
+      const generate = deps.generateContent;
+      analysis = await analyzeConsultationAudio({
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        ...(generate !== undefined ? { generateContent: generate } : {}),
+      });
+    }
+  } catch (err) {
+    await db.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { status: 'FAILED' },
+    }).catch(() => {});
+    throw err;
   }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;
@@ -431,63 +442,71 @@ export async function runCycle2DoctorDecision(
   const generateDecision = deps.generateContent;
   let synthesis: Cycle2Synthesis;
   let decisionTranscript: StoredTranscript | null = prior.decisionTranscript;
-  if (generateDecision !== undefined) {
-    synthesis = await synthesizeDoctorDecision({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      cycle1Context: prior.cycle1,
-      generateContent: generateDecision,
-    });
-  } else if (useGroqPipeline(deps)) {
-    // Groq 3-stage path. The UI sends ONE recording for both cycles: when
-    // the Cycle-2 bytes match Cycle-1 (audio hash), the cleaned transcript
-    // is reused with ZERO extra AI calls. A different audio (e.g. a fresh
-    // doctor dictation) runs the full transcribe+cleanup pipeline instead.
-    const stages = deps.groqStages;
-    const audioHash = sha256Hex(input.audioBase64);
-    let cleanedDecisionText: string;
-    if (prior.transcript !== null && prior.transcript.audioHash === audioHash) {
-      decisionTranscript = prior.transcript;
-      cleanedDecisionText = prior.transcript.cleaned;
-    } else {
-      const audioInput = {
+  try {
+    if (generateDecision !== undefined) {
+      synthesis = await synthesizeDoctorDecision({
         audioBase64: input.audioBase64,
         ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      };
-      const rawDecision =
-        stages !== undefined ? await stages.transcribe(audioInput) : await transcribeAudio(audioInput);
-      const ctx = await cleanupContext(db, session);
-      const cleanedDecision =
-        stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
-      decisionTranscript = {
-        raw: rawDecision,
-        cleaned: cleanedDecision.cleanedText,
-        segments: cleanedDecision.segments,
-        cleanedAt: new Date().toISOString(),
-        model: resolveGroqConfig().chatModel,
-        audioHash,
-      };
-      cleanedDecisionText = cleanedDecision.cleanedText;
+        cycle1Context: prior.cycle1,
+        generateContent: generateDecision,
+      });
+    } else if (useGroqPipeline(deps)) {
+      // Groq 3-stage path. The UI sends ONE recording for both cycles: when
+      // the Cycle-2 bytes match Cycle-1 (audio hash), the cleaned transcript
+      // is reused with ZERO extra AI calls. A different audio (e.g. a fresh
+      // doctor dictation) runs the full transcribe+cleanup pipeline instead.
+      const stages = deps.groqStages;
+      const audioHash = sha256Hex(input.audioBase64);
+      let cleanedDecisionText: string;
+      if (prior.transcript !== null && prior.transcript.audioHash === audioHash) {
+        decisionTranscript = prior.transcript;
+        cleanedDecisionText = prior.transcript.cleaned;
+      } else {
+        const audioInput = {
+          audioBase64: input.audioBase64,
+          ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        };
+        const rawDecision =
+          stages !== undefined ? await stages.transcribe(audioInput) : await transcribeAudio(audioInput);
+        const ctx = await cleanupContext(db, session);
+        const cleanedDecision =
+          stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
+        decisionTranscript = {
+          raw: rawDecision,
+          cleaned: cleanedDecision.cleanedText,
+          segments: cleanedDecision.segments,
+          cleanedAt: new Date().toISOString(),
+          model: resolveGroqConfig().chatModel,
+          audioHash,
+        };
+        cleanedDecisionText = cleanedDecision.cleanedText;
+      }
+      const synthesisJson =
+        stages !== undefined
+          ? await stages.analyze({
+              systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+              cleanedText: cleanedDecisionText,
+              contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+            })
+          : await analyzeCleanedTranscript({
+              systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+              cleanedText: cleanedDecisionText,
+              contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+            });
+      synthesis = parseCycleJson<Cycle2Synthesis>(cycle2SynthesisSchema, synthesisJson);
+    } else {
+      synthesis = await synthesizeDoctorDecision({
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        cycle1Context: prior.cycle1,
+      });
     }
-    const synthesisJson =
-      stages !== undefined
-        ? await stages.analyze({
-            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
-            cleanedText: cleanedDecisionText,
-            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
-          })
-        : await analyzeCleanedTranscript({
-            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
-            cleanedText: cleanedDecisionText,
-            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
-          });
-    synthesis = parseCycleJson<Cycle2Synthesis>(cycle2SynthesisSchema, synthesisJson);
-  } else {
-    synthesis = await synthesizeDoctorDecision({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      cycle1Context: prior.cycle1,
-    });
+  } catch (err) {
+    await db.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { status: 'FAILED' },
+    }).catch(() => {});
+    throw err;
   }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;
@@ -846,6 +865,163 @@ export async function withdrawConsentScribeSession(
     withdrawnAt: updated.withdrawnAt === null ? null : updated.withdrawnAt.toISOString(),
     retentionUntil: updated.audioRetentionUntil === null ? null : updated.audioRetentionUntil.toISOString(),
     audioPurged: true as const,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /sessions/:id/cancel [DOCTOR] — cancel a pending/in-progress session.
+// Purges audio, updates status to WITHDRAWN, audits cancellation.
+// Committed sessions cannot be cancelled.
+// ---------------------------------------------------------------------------
+export async function cancelScribeSession(
+  sessionId: string,
+  input: CancelSessionInput = {},
+  actor: DoctorActor,
+  deps: ScribeTestDeps = {},
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  status: 'WITHDRAWN';
+  cancelled: true;
+  audioPurged: true;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const purgeFiles = deps.purgeAudioFiles ?? purgeScribeAudio;
+  await purgeFiles(sessionId);
+
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: {
+        status: 'WITHDRAWN',
+        consentStatus: 'WITHDRAWN',
+        withdrawnAt: new Date(),
+        withdrawalReason: input.reason ?? 'CANCELLED_BY_DOCTOR',
+        audioReference: null,
+      },
+    });
+    if (claimed.count === 0) {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CONSENT_WITHDRAWN',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'CANCELLED_BY_DOCTOR',
+      afterState: { status: 'WITHDRAWN', action: 'CANCEL', audioPurged: true },
+    });
+  });
+
+  return {
+    sessionId,
+    status: 'WITHDRAWN' as const,
+    cancelled: true as const,
+    audioPurged: true as const,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /sessions/:id/stop [DOCTOR] — stop an active/recording scribe session.
+// Marks stoppedAt on the session row and audits the stop.
+// Committed sessions cannot be stopped.
+// ---------------------------------------------------------------------------
+export async function stopScribeSession(
+  sessionId: string,
+  input: StopSessionInput = {},
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  status: ScribeSessionStatus;
+  stoppedAt: string;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const stoppedAt = new Date();
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { stoppedAt },
+    });
+    if (claimed.count === 0) {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CONSENT_WITHDRAWN',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'STOPPED_BY_DOCTOR',
+      afterState: { status: session.status, action: 'STOP', stoppedAt: stoppedAt.toISOString() },
+    });
+  });
+
+  return {
+    sessionId,
+    status: session.status,
+    stoppedAt: stoppedAt.toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /sessions/:id [DOCTOR] — delete an uncommitted scribe session + drafts.
+// Purges audio, removes session & draft rows, and audits deletion.
+// Committed sessions cannot be deleted.
+// ---------------------------------------------------------------------------
+export async function deleteScribeSession(
+  sessionId: string,
+  input: DeleteSessionInput = {},
+  actor: DoctorActor,
+  deps: ScribeTestDeps = {},
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  deleted: true;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const purgeFiles = deps.purgeAudioFiles ?? purgeScribeAudio;
+  await purgeFiles(sessionId);
+
+  await db.$transaction(async (tx) => {
+    const fresh = await tx.scribeSession.findUniqueOrThrow({ where: { id: sessionId } });
+    if (fresh.status === 'COMMITTED') {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+
+    await tx.scribeDraft.deleteMany({ where: { scribeSessionId: sessionId } });
+    await tx.scribeSession.delete({ where: { id: sessionId } });
+
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'ENCOUNTER_DISCARD',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'DELETED_BY_DOCTOR',
+      afterState: { deleted: true, action: 'DELETE', priorStatus: session.status },
+    });
+  });
+
+  return {
+    sessionId,
+    deleted: true as const,
   };
 }
 

@@ -17,6 +17,11 @@ enum Role {
   SECRETARY
 }
 
+enum Gender {
+  MALE
+  FEMALE
+}
+
 enum QueueStatus {
   WAITING
   IN_CONSULTATION
@@ -24,6 +29,12 @@ enum QueueStatus {
   SKIPPED
   NO_SHOW
   ABANDONED
+}
+
+enum CallRequestStatus {
+  PENDING
+  APPROVED
+  CANCELLED
 }
 
 enum InvoiceStatus {
@@ -127,6 +138,7 @@ enum AuditAction {
   LOGOUT
   REFRESH
   USER_CREATE
+  USER_UPDATE
   USER_DEACTIVATE
   USER_ACTIVATE
   PASSWORD_CHANGE
@@ -136,6 +148,9 @@ enum AuditAction {
   PATIENT_FLAGGED_DUPLICATE
   QUEUE_CHECKIN
   QUEUE_CALL
+  CALL_REQUEST_CREATE
+  CALL_REQUEST_APPROVE
+  CALL_REQUEST_CANCEL
   QUEUE_SKIP
   QUEUE_REQUEUE
   QUEUE_COMPLETE
@@ -166,6 +181,7 @@ enum AuditAction {
   ENCOUNTER_SIGN
   ENCOUNTER_DISCARD
   ENCOUNTER_ADDENDUM
+  ENCOUNTER_AI_DIAGNOSIS
   CHART_READ
   MEDICATION_CREATE
   MEDICATION_DISCONTINUE
@@ -190,6 +206,7 @@ model User {
   identifier           String    @unique
   passwordHash         String    @map("password_hash")
   role                 Role      @default(SECRETARY)
+  gender               Gender    @default(FEMALE)
   isActive             Boolean   @default(true) @map("is_active")
   createdByUserId      String?   @map("created_by_user_id")
   lastLoginAt          DateTime? @map("last_login_at")
@@ -217,6 +234,7 @@ model User {
   vaultNotesCreated     TherapyNote[]        @relation("VaultCreator")
   scribeCreated         ScribeSession[]      @relation("ScribeCreator")
   auditEvents           AuditEvent[]         @relation("AuditActor")
+  callRequestsRequested CallRequest[]        @relation("CallRequester")
 
   @@index([role, isActive])
   @@map("users")
@@ -374,6 +392,7 @@ model QueueEntry {
   shift         Shift             @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   invoice       Invoice?          @relation("QueueInvoice")
   intercomLinks IntercomMessage[] @relation("IntercomQueueLink")
+  callRequests  CallRequest[]
 
   @@unique([shiftId, idempotencyKey])
   @@index([shiftId, status, position])
@@ -381,6 +400,22 @@ model QueueEntry {
   @@index([clinicalEncounterRef])
   @@index([shiftId, emergencyFlaggedAt])
   @@map("queue_entries")
+}
+
+model CallRequest {
+  id                String            @id @default(cuid())
+  queueEntryId      String            @map("queue_entry_id")
+  requestedByUserId String            @map("requested_by_user_id")
+  status            CallRequestStatus @default(PENDING)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  queueEntry  QueueEntry @relation(fields: [queueEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedBy User       @relation("CallRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([queueEntryId, status])
+  @@index([status])
+  @@map("call_requests")
 }
 
 model Invoice {
@@ -530,6 +565,7 @@ model Encounter {
   mseSpeechCoherence   String          @default("NOT_PERFORMED") @map("mse_speech_coherence")
   mseMoodAffect        String          @default("NOT_PERFORMED") @map("mse_mood_affect")
   diagnoses            Json            @default("[]")
+  diagnosisNotes       String?         @map("diagnosis_notes")
   status               EncounterStatus @default(DRAFT)
   // BE-501 OCC: rowVersion starts at 1, increments on every PATCH/sign.
   rowVersion           Int             @default(1) @map("row_version")

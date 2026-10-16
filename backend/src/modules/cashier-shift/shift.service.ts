@@ -17,6 +17,7 @@ import {
 import {
   assertShiftOpen,
   deriveOpeningCarryForward,
+  ensureAutoShift,
   isUniqueViolation,
   loadShiftOrThrow,
   lockShift,
@@ -25,6 +26,7 @@ import {
   writeShiftAudit,
   writeShiftAuditStandalone,
 } from './shift.support.js';
+import { loadEnv } from '../../config/env.js';
 import {
   checkShiftInvariants,
   computeExpectedCash,
@@ -179,19 +181,29 @@ export async function createPetty(
   idempotencyKey: string,
   db: PrismaClient = prisma,
 ): Promise<SecretSafe<ReturnType<typeof toSecretPettyExpenseDto>>> {
-  const shift = await loadShiftOrThrow(db, shiftId);
-  assertShiftOpen(shift.status, shiftId);
+  let effectiveShiftId = shiftId;
+  const env = loadEnv();
+  if (!env.SHIFT_SYSTEM_ENABLED) {
+    const shift = await db.shift.findUnique({ where: { id: shiftId } }).catch(() => null);
+    if (shift === null || shift.status !== 'OPEN') {
+      const auto = await ensureAutoShift(db, actor.userId);
+      effectiveShiftId = auto.id;
+    }
+  } else {
+    const shift = await loadShiftOrThrow(db, shiftId);
+    assertShiftOpen(shift.status, shiftId);
+  }
 
   try {
     const result = await db.$transaction(async (tx) => {
-      await lockShift(tx, shiftId);
+      await lockShift(tx, effectiveShiftId);
 
-      const locked = await tx.shift.findUniqueOrThrow({ where: { id: shiftId }, select: { status: true } });
-      assertShiftOpen(locked.status, shiftId);
+      const locked = await tx.shift.findUniqueOrThrow({ where: { id: effectiveShiftId }, select: { status: true } });
+      assertShiftOpen(locked.status, effectiveShiftId);
 
       const petty = await tx.pettyExpense.create({
         data: {
-          shiftId,
+          shiftId: effectiveShiftId,
           amountMinor: input.amountMinor,
           description: input.description,
           category: input.category,
@@ -277,52 +289,55 @@ export async function closeShift(
   idempotencyKey: string,
   db: PrismaClient = prisma,
 ): Promise<SecretSafe<ReturnType<typeof toSecretShiftCloseDto>>> {
-  const existing = await loadShiftOrThrow(db, shiftId);
+  let effectiveShiftId = shiftId;
+  if (shiftId === 'current' || shiftId === 'auto') {
+    const open = await db.shift.findFirst({ where: { status: 'OPEN' }, select: { id: true } });
+    if (open === null) {
+      throw new AppError('NO_OPEN_SHIFT', 'No open shift to close');
+    }
+    effectiveShiftId = open.id;
+  }
+  const existing = await loadShiftOrThrow(db, effectiveShiftId);
   if (existing.status !== 'OPEN') {
-    throw new AppError('SHIFT_NOT_OPEN', `Shift ${shiftId} is already ${existing.status}`, [
+    throw new AppError('SHIFT_NOT_OPEN', `Shift ${effectiveShiftId} is already ${existing.status}`, [
       { field: 'status', issue: 'shift is not OPEN', expected: "status = 'OPEN'" },
     ]);
   }
 
-  const force = input.force === true;
-  const forceReason = input.forceReason;
+  const effectiveReason = input.reason ?? input.closeReason ?? input.forceReason;
+  const force = input.force === true || effectiveReason !== undefined;
 
-  // Force is a DOCTOR-only escape hatch (CONV/RPS-2: force requires doctor+reason+audit).
-  if (force && actor.role !== 'DOCTOR') {
-    throw AppError.forbidden('Only a doctor may force-close a shift with open entries or invariant violations');
-  }
-  if (!force && forceReason !== undefined) {
-    throw new AppError('UNPROCESSABLE', 'forceReason is only accepted together with force: true');
-  }
+  // P1-5: The secretary or doctor can close the day with waiting patients or discrepancies
+  // when a reason is provided. The doctor-only force restriction has been removed.
 
   const result = await db.$transaction(async (tx) => {
-    await lockShift(tx, shiftId);
+    await lockShift(tx, effectiveShiftId);
 
     // Re-read under the row lock: another writer may have closed it meanwhile.
-    const locked = await tx.shift.findUniqueOrThrow({ where: { id: shiftId } });
+    const locked = await tx.shift.findUniqueOrThrow({ where: { id: effectiveShiftId } });
     if (locked.status !== 'OPEN') {
-      throw new AppError('SHIFT_NOT_OPEN', `Shift ${shiftId} is already ${locked.status}`);
+      throw new AppError('SHIFT_NOT_OPEN', `Shift ${effectiveShiftId} is already ${locked.status}`);
     }
 
-    // (2) Open queue entries block an orderly close unless forced.
+    // (2) Open queue entries block an orderly close unless a reason is provided.
     const openEntries = await tx.queueEntry.count({
-      where: { shiftId, status: { in: ['WAITING', 'IN_CONSULTATION'] } },
+      where: { shiftId: effectiveShiftId, status: { in: ['WAITING', 'IN_CONSULTATION'] } },
     });
-    if (openEntries > 0 && !force) {
+    if (openEntries > 0 && !effectiveReason) {
       throw new AppError(
         'UNPROCESSABLE',
         `${openEntries} queue entr${openEntries === 1 ? 'y is' : 'ies are'} still WAITING or IN_CONSULTATION`, [
           {
-            field: 'force',
+            field: 'reason',
             issue: `${openEntries} open queue entr${openEntries === 1 ? 'y' : 'ies'} remain`,
-            expected: 'resolve the queue, or send force:true with forceReason as a DOCTOR',
+            expected: 'provide a reason to close with open queue entries',
           },
         ],
       );
     }
 
     // (3) Drawer formula — the single source of drawer math (BE-306).
-    const drawer = await computeExpectedCash(tx, shiftId, locked.openingFloatMinor);
+    const drawer = await computeExpectedCash(tx, effectiveShiftId, locked.openingFloatMinor);
     const expectedCashMinor = drawer.expectedCashMinor;
 
     // (4) Difference + result.
@@ -330,30 +345,37 @@ export async function closeShift(
     const shiftResult = deriveShiftResult(differenceMinor);
 
     // (5) Invariants gate (INV-1..INV-10 + APPX-D-3..6 via BE-306).
-    const report: InvariantReport = await checkShiftInvariants(shiftId, tx);
-    if (!report.passed && !force) {
+    const report: InvariantReport = await checkShiftInvariants(effectiveShiftId, tx);
+    if (!report.passed && !effectiveReason) {
       const details = report.failures.map((f) => ({
         field: f.code,
         issue: f.detail,
-        expected: 'resolve the discrepancy, or force-close as a DOCTOR with a reason',
+        expected: 'resolve the discrepancy, or provide a reason to close',
       }));
       throw new AppError('INVARIANT_VIOLATION', `Shift failed ${report.failures.length} reconciliation invariant(s)`, details);
     }
 
     // (6) Persist CLOSED. Expected is written here — the ONLY reveal point.
     const closed = await tx.shift.update({
-      where: { id: shiftId },
+      where: { id: effectiveShiftId },
       data: {
         status: 'CLOSED',
         expectedCashMinor,
         actualCountedMinor: input.actualCountedMinor,
         differenceMinor,
         result: shiftResult,
-        integrityCheckPassed: report.passed,
+        integrityCheckPassed: report.passed && openEntries === 0,
         closedByUserId: actor.userId,
         closedAt: new Date(),
         closeIdempotencyKey: idempotencyKey,
         queueVersion: locked.queueVersion + 1,
+        ...(effectiveReason !== undefined
+          ? {
+              reviewNote: effectiveReason,
+              reviewedByUserId: actor.userId,
+              reviewedAt: new Date(),
+            }
+          : {}),
       },
       select: { id: true, queueVersion: true },
     });
@@ -363,9 +385,9 @@ export async function closeShift(
       actorRole: actor.role,
       action: 'SHIFT_CLOSE',
       entityType: 'Shift',
-      entityId: shiftId,
+      entityId: effectiveShiftId,
       idempotencyKey,
-      reasonText: force === true && forceReason !== undefined ? forceReason : null,
+      reasonText: effectiveReason ?? null,
       beforeState: {
         status: 'OPEN',
         openingFloatMinor: locked.openingFloatMinor,
@@ -377,9 +399,10 @@ export async function closeShift(
         actualCountedMinor: input.actualCountedMinor,
         differenceMinor,
         result: shiftResult,
-        integrityCheckPassed: report.passed,
         forced: force,
-        ...(force === true && forceReason !== undefined ? { forceReason } : {}),
+        closedWithOpenEntries: openEntries > 0,
+        openEntriesCount: openEntries,
+        ...(effectiveReason !== undefined ? { forceReason: effectiveReason } : {}),
         invariantFailures: formatInvariantFailures(report),
         drawer: {
           cashChargeMinor: drawer.cashChargeMinor,
@@ -605,6 +628,51 @@ export async function runIntegrityCheck(
   }
 
   return toSecretIntegrityCheckDto(input.shiftId, report.passed, failures);
+}
+
+// ===========================================================================
+// POST /shifts/reopen  [BOTH]  -> 200 SecretSafe<ShiftViewDto>
+// P1-7: Reopen the day's closed shift freely so operations can resume.
+// ===========================================================================
+export async function reopenShift(
+  shiftId: string | undefined,
+  actor: Actor,
+  db: PrismaClient = prisma,
+): Promise<SecretSafe<ReturnType<typeof toSecretShiftViewDto>>> {
+  const targetShift = shiftId
+    ? await loadShiftOrThrow(db, shiftId)
+    : await db.shift.findFirst({
+        orderBy: { createdAt: 'desc' },
+      });
+
+  if (!targetShift) {
+    throw AppError.notFound('No shift to reopen');
+  }
+
+  if (targetShift.status === 'OPEN') {
+    return toSecretShiftViewDto(toShiftRow(targetShift), true);
+  }
+
+  const reopened = await db.shift.update({
+    where: { id: targetShift.id },
+    data: {
+      status: 'OPEN',
+      closedAt: null,
+      closedByUserId: null,
+      closeIdempotencyKey: null,
+    },
+  });
+
+  await writeShiftAuditStandalone(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'SHIFT_OPEN',
+    entityType: 'Shift',
+    entityId: reopened.id,
+    reasonText: 'إعادة فتح اليوم',
+  });
+
+  return toSecretShiftViewDto(toShiftRow(reopened), true);
 }
 
 /** Re-exported so callers need not import two modules for a close-time probe. */

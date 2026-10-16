@@ -398,16 +398,42 @@ export async function getUnsignedNotes(query: UnsignedNotesQuery, db: Db = prism
     if (s.queueEntryRef !== null) signedRefs.add(s.queueEntryRef);
   }
 
+  const deferredAudits =
+    entryIds.length > 0 && typeof db.auditEvent?.findMany === 'function'
+      ? await db.auditEvent.findMany({
+          where: {
+            entityType: 'DocumentationDeferral',
+            entityId: { in: entryIds },
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+  const deferralMap = new Map<string, { reason: string | null; deferredAt: string }>();
+  for (const d of deferredAudits) {
+    if (!deferralMap.has(d.entityId)) {
+      deferralMap.set(d.entityId, {
+        reason: d.reasonText,
+        deferredAt: d.createdAt.toISOString(),
+      });
+    }
+  }
+
   const completedWithoutSigned = completedEntries
     .filter((e) => !signedRefs.has(e.id))
-    .map((e) => ({
-      queueEntryId: e.id,
-      patientId: e.patientId,
-      displayName: e.patient.fullName,
-      status: String(e.status),
-      completedAt: e.completedAt === null ? null : e.completedAt.toISOString(),
-      hasSignedEncounter: false as const,
-    }));
+    .map((e) => {
+      const def = deferralMap.get(e.id);
+      return {
+        queueEntryId: e.id,
+        patientId: e.patientId,
+        displayName: e.patient.fullName,
+        status: String(e.status),
+        completedAt: e.completedAt === null ? null : e.completedAt.toISOString(),
+        hasSignedEncounter: false as const,
+        isDeferred: def !== undefined,
+        deferredReason: def?.reason ?? null,
+        deferredAt: def?.deferredAt ?? null,
+      };
+    });
 
   const nowMs = Date.now();
   const [draftEncounters, scribeDrafts] = await Promise.all([
@@ -458,6 +484,7 @@ export async function getUnsignedNotes(query: UnsignedNotesQuery, db: Db = prism
     shiftId: shift === null ? null : shift.id,
     completedWithoutSigned,
     staleDrafts,
+    deferralCount: deferralMap.size,
   };
 }
 

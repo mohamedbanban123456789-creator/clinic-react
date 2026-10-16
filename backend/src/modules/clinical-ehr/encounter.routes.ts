@@ -10,6 +10,7 @@ import {
   getChart,
   getEncounter,
   patchEncounter,
+  runAiDiagnosisForEncounter,
   signEncounter,
 } from './encounter.service.js';
 import {
@@ -155,3 +156,18 @@ encounterRouter.post(
       .catch(next);
   },
 );
+
+// POST /api/v1/ehr/encounters/:id/ai-diagnosis [DOCTOR] — runs AI diagnosis analysis over session content
+encounterRouter.post(
+  '/encounters/:id/ai-diagnosis',
+  requireRole('DOCTOR'),
+  validate(encounterIdParamSchema, 'params'),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    runAiDiagnosisForEncounter(params.id, { userId: auth.userId, role: auth.role })
+      .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+

@@ -1,6 +1,6 @@
 /** Shift endpoints — /api/v1/shifts */
 
-import { apiRequest } from "./client"
+import { apiRequest, ApiError } from "./client"
 import type {
   CloseShiftDto,
   CursorPage,
@@ -10,8 +10,13 @@ import type {
 } from "./types"
 
 export const shiftsApi = {
-  current(): Promise<ShiftViewDto> {
-    return apiRequest("/shifts/current")
+  current(): Promise<ShiftViewDto | null> {
+    return apiRequest<ShiftViewDto>("/shifts/current").catch((err) => {
+      if (err instanceof ApiError && err.status === 404) {
+        return null
+      }
+      throw err
+    })
   },
 
   get(shiftId: string): Promise<ShiftViewDto> {
@@ -64,7 +69,7 @@ export const shiftsApi = {
   close(
     shiftId: string,
     actualCountedMinor: number,
-    opts: { force?: boolean; forceReason?: string } = {},
+    opts: { force?: boolean; forceReason?: string; reason?: string } = {},
   ): Promise<CloseShiftDto> {
     return apiRequest(`/shifts/${shiftId}/close`, {
       method: "POST",
@@ -72,8 +77,16 @@ export const shiftsApi = {
         actualCountedMinor,
         ...(opts.force !== undefined ? { force: opts.force } : {}),
         ...(opts.forceReason ? { forceReason: opts.forceReason } : {}),
+        ...(opts.reason ? { reason: opts.reason } : {}),
       },
       idempotency: true,
+    })
+  },
+
+  reopen(shiftId?: string): Promise<ShiftViewDto> {
+    return apiRequest("/shifts/reopen", {
+      method: "POST",
+      body: { shiftId },
     })
   },
 }

@@ -4,6 +4,7 @@ export interface ErrorDetail {
   readonly field?: string;
   readonly issue: string;
   readonly expected?: string;
+  readonly [key: string]: unknown;
 }
 
 export type ErrorCode =
@@ -53,6 +54,10 @@ export type ErrorCode =
   | 'GROQ_TIMEOUT'
   | 'GROQ_UPSTREAM'
   | 'INVOICE_ALREADY_WRITTEN_OFF'
+  | 'DOCUMENTATION_REQUIRED'
+  | 'PENDING_CALL_REQUEST_EXISTS'
+  | 'CALL_REQUEST_NOT_FOUND'
+  | 'CALL_REQUEST_NOT_PENDING'
   | 'INTERNAL';
 
 const StatusByCode: Record<ErrorCode, number> = {
@@ -102,6 +107,10 @@ const StatusByCode: Record<ErrorCode, number> = {
   GROQ_TIMEOUT: 504,
   GROQ_UPSTREAM: 502,
   INVOICE_ALREADY_WRITTEN_OFF: 400,
+  DOCUMENTATION_REQUIRED: 409,
+  PENDING_CALL_REQUEST_EXISTS: 409,
+  CALL_REQUEST_NOT_FOUND: 404,
+  CALL_REQUEST_NOT_PENDING: 409,
   INTERNAL: 500,
 };
 

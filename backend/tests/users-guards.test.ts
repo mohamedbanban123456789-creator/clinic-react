@@ -7,11 +7,14 @@ import { AppError } from '../src/common/errors/AppError.js';
 import {
   createSecretarySchema,
   resetPasswordSchema,
+  updateUserNameSchema,
   userIdParamSchema,
 } from '../src/modules/auth-users/users.validators.js';
+import { updateMeSchema } from '../src/modules/auth-users/auth.validators.js';
 import { toActivationDto, toManagedUserDto } from '../src/modules/auth-users/users.dto.js';
 import { toMeDto } from '../src/modules/auth-users/auth.dto.js';
-import { getMe } from '../src/modules/auth-users/auth.profile.js';
+import { getMe, updateMe } from '../src/modules/auth-users/auth.profile.js';
+import { updateUserName } from '../src/modules/auth-users/users.service.js';
 import { isSecretSafe } from '../src/common/types/secretSafe.js';
 import type { PrismaClient } from '@prisma/client';
 
@@ -87,9 +90,15 @@ function mockRes(): Response {
   assert.equal(stale.code, 'PASSWORD_CHANGE_REQUIRED');
 }
 
-/** BE-104 (3): create-secretary Zod — all fields required non-blank; password min 8. */
+/** BE-104 (3): create-secretary Zod — all fields required non-blank; password min 8; gender defaults to FEMALE or accepts MALE/FEMALE. */
 {
   assert.equal(createSecretarySchema.safeParse({ name: 'A', identifier: 's1', password: 'longenough1' }).success, true);
+  const parsedDefault = createSecretarySchema.parse({ name: 'A', identifier: 's1', password: 'longenough1' });
+  assert.equal(parsedDefault.gender, 'FEMALE');
+  const parsedMale = createSecretarySchema.parse({ name: 'أحمد علي', identifier: 'ahmed_sec', password: 'longenough1', gender: 'MALE' });
+  assert.equal(parsedMale.gender, 'MALE');
+  assert.equal(createSecretarySchema.safeParse({ name: 'سارة محمود أحمد', identifier: 'sara_sec', password: 'longenough1', gender: 'FEMALE' }).success, true, 'Arabic secretary name accepted');
+  assert.equal(createSecretarySchema.safeParse({ name: 'A', identifier: 's1', password: 'longenough1', gender: 'OTHER' }).success, false, 'Invalid gender rejected');
   for (const bad of [
     { name: '   ', identifier: 's1', password: 'longenough1' },
     { name: 'A', identifier: '', password: 'longenough1' },
@@ -106,9 +115,15 @@ function mockRes(): Response {
 
 /** BE-104 (4): DTOs are allowlisted SecretSafe (no passwordHash/tokenVersion keys). */
 {
-  const dto = toManagedUserDto({ id: 'u1', name: 'Sec', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  const dto = toManagedUserDto({ id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', gender: 'FEMALE', isActive: true });
   assert.equal(isSecretSafe(dto), true);
-  assert.deepEqual({ ...dto }, { id: 'u1', name: 'Sec', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  assert.deepEqual({ ...dto }, { id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', gender: 'FEMALE', isActive: true });
+  assert.equal(dto.name, 'سارة محمود', 'Arabic name preserved verbatim');
+  assert.equal(dto.gender, 'FEMALE');
+
+  const dtoMale = toManagedUserDto({ id: 'u2', name: 'أحمد علي', identifier: 'sec-2', role: 'SECRETARY', gender: 'MALE', isActive: true });
+  assert.equal(dtoMale.gender, 'MALE');
+
   const act = toActivationDto({ id: 'u1', isActive: false });
   assert.equal(isSecretSafe(act), true);
   assert.deepEqual({ ...act }, { id: 'u1', isActive: false });
@@ -125,15 +140,16 @@ function mockRes(): Response {
  *  (browser reload / cold boot), not just the login envelope. */
 {
   // DTO shape: always-present boolean, allowlisted.
-  const me = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', lastLoginAt: new Date('2026-10-01T00:00:00Z'), passwordMustChange: true });
+  const me = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', gender: 'MALE', lastLoginAt: new Date('2026-10-01T00:00:00Z'), passwordMustChange: true });
   assert.equal(isSecretSafe(me), true);
   assert.deepEqual({ ...me }, {
-    id: 'u1', name: 'Doc', role: 'DOCTOR',
+    id: 'u1', name: 'Doc', role: 'DOCTOR', gender: 'MALE',
     lastLoginAt: '2026-10-01T00:00:00.000Z',
     passwordMustChange: true,
   });
   const meClear = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', lastLoginAt: null, passwordMustChange: false });
   assert.equal({ ...meClear }.passwordMustChange, false, 'flag is an explicit boolean, not omitted');
+  assert.equal({ ...meClear }.gender, 'FEMALE', 'default gender is FEMALE');
 
   // getMe reads the flag from the DB and includes it in the response.
   const db = {
@@ -148,6 +164,39 @@ function mockRes(): Response {
   } as unknown as PrismaClient;
   const res = await getMe('u1', db);
   assert.equal({ ...res }.passwordMustChange, true, '/auth/me response carries passwordMustChange');
+}
+
+/** P1-12: Editable names — own name via updateMe, any user name via updateUserName. */
+{
+  assert.equal(updateMeSchema.safeParse({ name: 'د. سامي المحدث' }).success, true);
+  assert.equal(updateMeSchema.safeParse({ name: '' }).success, false);
+  assert.equal(updateUserNameSchema.safeParse({ name: 'أحمد محمود' }).success, true);
+  assert.equal(updateUserNameSchema.safeParse({ name: '   ' }).success, false);
+
+  let auditCreated = false;
+  const mockDb = {
+    user: {
+      findUnique: (args: { where: { id: string } }): Promise<Record<string, unknown> | null> =>
+        Promise.resolve({ id: args.where.id, name: 'قديم', role: 'SECRETARY', gender: 'MALE', isActive: true, passwordMustChange: false, lastLoginAt: null }),
+      update: (args: { where: { id: string }; data: { name: string } }): Promise<Record<string, unknown>> =>
+        Promise.resolve({ id: args.where.id, name: args.data.name, identifier: 'sec1', role: 'SECRETARY', gender: 'MALE', isActive: true, passwordMustChange: false, lastLoginAt: null }),
+    },
+    auditEvent: {
+      create: (): Promise<void> => {
+        auditCreated = true;
+        return Promise.resolve();
+      },
+    },
+  } as unknown as PrismaClient;
+
+  const updatedMe = await updateMe('u1', { name: 'الاسم الجديد' }, mockDb);
+  assert.equal(updatedMe.name, 'الاسم الجديد');
+  assert.equal(auditCreated, true);
+
+  auditCreated = false;
+  const updatedUser = await updateUserName('u2', { name: 'الموظف المحدث' }, { userId: 'u-doc', role: 'DOCTOR' }, mockDb);
+  assert.equal(updatedUser.name, 'الموظف المحدث');
+  assert.equal(auditCreated, true);
 }
 
 // eslint-disable-next-line no-console

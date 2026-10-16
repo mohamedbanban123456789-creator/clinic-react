@@ -234,6 +234,17 @@ function mockRes(): Response {
     scribeDraft: {
       findMany: (): Promise<unknown[]> => Promise.resolve([]),
     },
+    auditEvent: {
+      findMany: (): Promise<unknown[]> =>
+        Promise.resolve([
+          {
+            entityId: 'qe-1',
+            entityType: 'DocumentationDeferral',
+            reasonText: 'تأجيل لانتظار نتائج المعمل',
+            createdAt: new Date('2026-10-10T12:00:00Z'),
+          },
+        ]),
+    },
   } as unknown as PrismaClient;
 
   const dto = await getUnsignedNotes({}, fake);
@@ -241,6 +252,9 @@ function mockRes(): Response {
   assert.equal(dto.completedWithoutSigned.length, 1);
   assert.equal(dto.completedWithoutSigned[0]?.queueEntryId, 'qe-1');
   assert.equal(dto.completedWithoutSigned[0]?.hasSignedEncounter, false);
+  assert.equal(dto.completedWithoutSigned[0]?.isDeferred, true);
+  assert.equal(dto.completedWithoutSigned[0]?.deferredReason, 'تأجيل لانتظار نتائج المعمل');
+  assert.equal(dto.deferralCount, 1);
   assert.equal(dto.staleDrafts.length, 1);
   assert.equal(dto.staleDrafts[0]?.draftKind, 'ENCOUNTER');
   assert.equal(dto.staleDrafts[0]?.stale, true);

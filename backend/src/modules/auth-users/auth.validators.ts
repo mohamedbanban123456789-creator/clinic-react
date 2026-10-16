@@ -10,5 +10,10 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8, 'newPassword must be at least 8 characters').max(256),
 });
 
+export const updateMeSchema = z.object({
+  name: z.string({ required_error: 'name is required' }).trim().min(1, 'name is required').max(120),
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type UpdateMeInput = z.infer<typeof updateMeSchema>;

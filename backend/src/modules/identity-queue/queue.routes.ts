@@ -6,11 +6,16 @@ import { idempotency } from '../../common/middleware/idempotency.js';
 import { AppError } from '../../common/errors/AppError.js';
 import {
   abandonEntry,
+  approveCallRequest,
   callEntry,
   callNext,
+  cancelCallRequest,
   checkIn,
   completeEntry,
+  createCallRequest,
   debtAck,
+  deferDocumentation,
+  getPendingCallRequest,
   getWaitTimes,
   listQueue,
   markNoShow,
@@ -23,9 +28,12 @@ import {
 import {
   abandonSchema,
   callNextSchema,
+  callRequestIdParamSchema,
   callSchema,
   checkInSchema,
+  createCallRequestSchema,
   debtAckSchema,
+  deferDocumentationSchema,
   emergencyToggleSchema,
   entryIdParamSchema,
   noShowSchema,
@@ -38,6 +46,8 @@ import {
   type CallInput,
   type CallNextInput,
   type CheckInInput,
+  type CreateCallRequestInput,
+  type DeferDocumentationInput,
   type EmergencyToggleInput,
   type NoShowInput,
   type ReorderInput,
@@ -115,6 +125,57 @@ queueRouter.post(
     const auth = requireAuth(req);
     reorderQueue(req.body as ReorderInput, { userId: auth.userId, role: auth.role })
       .then((reordered) => res.status(200).json(reordered))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/queue/call-request  [DOCTOR]
+queueRouter.post(
+  '/call-request',
+  requireRole('DOCTOR'),
+  validate(createCallRequestSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    createCallRequest(req.body as CreateCallRequestInput, { userId: auth.userId, role: auth.role })
+      .then((callReq) => res.status(200).json(callReq))
+      .catch(next);
+  },
+);
+
+// GET /api/v1/queue/call-request/pending  [BOTH]
+queueRouter.get(
+  '/call-request/pending',
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    getPendingCallRequest({ userId: auth.userId, role: auth.role })
+      .then((pending) => res.status(200).json(pending))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/queue/call-request/:id/approve  [SECRETARY]
+queueRouter.post(
+  '/call-request/:id/approve',
+  requireRole('SECRETARY'),
+  validate(callRequestIdParamSchema, 'params'),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    approveCallRequest(params.id, { userId: auth.userId, role: auth.role })
+      .then((approved) => res.status(200).json(approved))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/queue/call-request/:id/cancel  [BOTH]
+queueRouter.post(
+  '/call-request/:id/cancel',
+  validate(callRequestIdParamSchema, 'params'),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    cancelCallRequest(params.id, { userId: auth.userId, role: auth.role })
+      .then((cancelled) => res.status(200).json(cancelled))
       .catch(next);
   },
 );
@@ -270,6 +331,21 @@ queueRouter.post(
     const params = req.params as { entryId: string };
     debtAck(params.entryId, { userId: auth.userId, role: auth.role })
       .then((entry) => res.status(200).json(entry))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/queue/:entryId/defer-documentation  [DOCTOR]
+queueRouter.post(
+  '/:entryId/defer-documentation',
+  requireRole('DOCTOR'),
+  validate(entryIdParamSchema, 'params'),
+  validate(deferDocumentationSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { entryId: string };
+    deferDocumentation(params.entryId, req.body as DeferDocumentationInput, { userId: auth.userId, role: auth.role })
+      .then((result) => res.status(200).json(result))
       .catch(next);
   },
 );

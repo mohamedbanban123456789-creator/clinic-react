@@ -15,10 +15,13 @@ import { useAuth } from "@/auth/AuthContext"
 import { useToast } from "@/components/ui"
 import { Icon } from "@/components/ui"
 import { arTime } from "@/lib/format"
+import { usersApi } from "@/api/admin"
 import {
   doctorTemplates,
+  getDoctorTemplates,
   intercomTypeLabel,
   secretaryTemplates,
+  tSec,
   type IntercomType,
 } from "@/lib/constants"
 
@@ -39,6 +42,13 @@ export function Conversation({
   const queryClient = useQueryClient()
   const role = user?.role ?? "SECRETARY"
   const isDoctor = role === "DOCTOR"
+
+  const usersQuery = useQuery({
+    queryKey: ["users"],
+    queryFn: () => usersApi.list(),
+    enabled: isDoctor,
+    staleTime: 60_000,
+  })
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["intercom", "recent"],
@@ -107,21 +117,33 @@ export function Conversation({
     })
   }
 
-  const templates = isDoctor ? doctorTemplates : secretaryTemplates
-  const otherName = isDoctor ? "سارة محمود" : "الطبيب/ة"
+  const secUser =
+    usersQuery.data?.data.find((u) => u.role === "SECRETARY" && u.isActive) ??
+    usersQuery.data?.data.find((u) => u.role === "SECRETARY")
+  const secGender = secUser?.gender ?? "FEMALE"
+  const secName = secUser?.name || (secGender === "MALE" ? "أحمد محمود" : "سارة محمود")
+
+  const templates = isDoctor ? getDoctorTemplates(secGender) : secretaryTemplates
+  const otherName = isDoctor ? secName : "الطبيب/ة"
+  const avatarInitial = isDoctor ? (secName.trim().charAt(0) || "س") : "ط"
+  const statusText = isDoctor
+    ? connected
+      ? tSec("متصل الآن", "متصلة الآن", secGender)
+      : tSec("غير متصل — الرسائل تصل عند العودة", "غير متصلة — الرسائل تصل عند العودة", secGender)
+    : connected
+      ? "متصل الآن"
+      : "غير متصل — الرسائل تصل عند العودة"
 
   return (
     <div className={`conversation ${expanded ? "expanded" : ""}`}>
       <div className="conversation-header">
         <div className="online-avatar">
-          {isDoctor ? "س" : "ط"}
+          {avatarInitial}
           <i />
         </div>
         <div>
           <strong>{otherName}</strong>
-          <small>
-            {connected ? "متصلة الآن" : "غير متصلة — الرسائل تصل عند العودة"}
-          </small>
+          <small>{statusText}</small>
         </div>
         {expanded && (
           <span className="secure-chat">
@@ -181,30 +203,54 @@ export function Conversation({
   )
 }
 
+import { useChat } from "@/context/ChatContext"
+
 export function FloatingChat({
-  open,
-  setOpen,
-  onComplimentary,
+  open: propOpen,
+  setOpen: propSetOpen,
+  onComplimentary: propOnComplimentary,
 }: {
-  open: boolean
-  setOpen: (v: boolean) => void
+  open?: boolean
+  setOpen?: (v: boolean) => void
   onComplimentary?: () => void
-}) {
+} = {}) {
+  const chatContext = useChat()
+  const open = propOpen !== undefined ? propOpen : chatContext.chatOpen
+  const setOpen = propSetOpen !== undefined ? propSetOpen : chatContext.setChatOpen
+  const onComplimentary = propOnComplimentary ?? chatContext.onComplimentary
+  const unreadCount = chatContext.unreadCount
+
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
+  const partnerLabel = isDoctor ? "الاستقبال" : "الطبيب"
+
   return (
     <div className={open ? "floating-chat open" : "floating-chat"}>
       {open && (
         <div className="floating-panel">
-          <button className="close-chat" onClick={() => setOpen(false)}>
+          <button
+            type="button"
+            className="close-chat"
+            onClick={() => setOpen(false)}
+            aria-label="إغلاق المحادثة"
+          >
             ×
           </button>
           <Conversation onComplimentary={onComplimentary} />
         </div>
       )}
-      <button className="chat-toggle" onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="chat-toggle"
+        onClick={() => chatContext.toggleChat()}
+        aria-label="المحادثة الفورية"
+      >
         <Icon name="message" />
-        <span>الاستقبال</span>
+        <span>{partnerLabel}</span>
+        {unreadCount > 0 && <span className="chat-badge">{unreadCount}</span>}
         <i />
       </button>
     </div>
   )
 }
+

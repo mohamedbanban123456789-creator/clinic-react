@@ -25,6 +25,7 @@ import {
   arNum,
   arDateTime,
   moneyMinor,
+  formatPhone,
 } from "@/lib/format"
 import { invoiceStatusLabel, cessationReasonOptions } from "@/lib/constants"
 import type { VaultNoteDto } from "@/api/types"
@@ -266,7 +267,11 @@ export default function PatientProfileScreen() {
             <p>
               {age !== null ? `${arNum(age)} سنة · ` : ""}
               {patient.physicalAddress ?? "العنوان غير مسجل"} ·{" "}
-              {patient.phone ? `••• •${patient.phone.slice(-4)}` : "بدون هاتف"}
+              {patient.phone ? (
+                <span className="phone-display">{formatPhone(patient.phone, null, isDoctor ? "DOCTOR" : "SECRETARY")}</span>
+              ) : (
+                "بدون هاتف"
+              )}
             </p>
           </div>
         </div>
@@ -444,7 +449,7 @@ export default function PatientProfileScreen() {
               )}
               {invoices.map((inv) => (
                 <div className="data-row" key={inv.invoiceId} style={{ cursor: "default" }}>
-                  <strong>{inv.invoiceId.slice(-8).toUpperCase()}</strong>
+                  <strong>{inv.invoiceId.slice(-6).toUpperCase()}</strong>
                   <span>{arDate(inv.createdAt)}</span>
                   <span>{moneyMinor(inv.finalFeeMinor)}</span>
                   <span>{moneyMinor(inv.collectedMinor)}</span>

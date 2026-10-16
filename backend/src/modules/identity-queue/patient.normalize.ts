@@ -38,11 +38,27 @@ function mapLocaleDigits(raw: string): string {
   return out;
 }
 
+/**
+ * Bidirectional Arabic character normalization:
+ * - Strip tashkeel / harakat (fatha, damma, kasra, tanwin, sukun, shadda, tatweel/kashida, dagger alef, etc.)
+ * - All alef forms (أ/إ/آ/ٱ) -> ا
+ * - ة and ه -> ه
+ * - ى and ي -> ي
+ */
+export function normalizeArabic(text: string): string {
+  return text
+    .replace(/[\u064B-\u065F\u0670\u0640\u0610-\u061A\u06D6-\u06ED]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي');
+}
+
 /** Normalize free-text names for duplicate comparison. Display value keeps trimmed original. */
 export function normalizeName(raw: string): string {
-  const folded = raw
+  const arabicNorm = normalizeArabic(raw);
+  const folded = arabicNorm
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
   const kept = folded.replace(/[^a-z0-9\u0600-\u06FF ]/g, ' ');
   return kept.replace(/\s+/g, ' ').trim();

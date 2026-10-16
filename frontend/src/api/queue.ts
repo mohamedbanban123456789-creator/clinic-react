@@ -1,11 +1,32 @@
-/** Queue endpoints — /api/v1/queue */
-
 import { apiRequest } from "./client"
-import type { QueueEntryDto, QueueListDto, WaitTimesDto } from "./types"
+import type { CallRequestDto, QueueEntryDto, QueueListDto, WaitTimesDto } from "./types"
 
 export const queueApi = {
   list(shiftId?: string, status?: string): Promise<QueueListDto> {
     return apiRequest("/queue", { query: { shiftId, status } })
+  },
+
+  createCallRequest(entryId?: string): Promise<CallRequestDto> {
+    return apiRequest("/queue/call-request", {
+      method: "POST",
+      body: entryId ? { entryId } : {},
+    })
+  },
+
+  getPendingCallRequest(): Promise<CallRequestDto | null> {
+    return apiRequest("/queue/call-request/pending")
+  },
+
+  approveCallRequest(id: string): Promise<CallRequestDto> {
+    return apiRequest(`/queue/call-request/${id}/approve`, {
+      method: "POST",
+    })
+  },
+
+  cancelCallRequest(id: string): Promise<CallRequestDto> {
+    return apiRequest(`/queue/call-request/${id}/cancel`, {
+      method: "POST",
+    })
   },
 
   waitTimes(shiftId?: string): Promise<WaitTimesDto> {
@@ -134,6 +155,16 @@ export const queueApi = {
     return apiRequest(`/queue/${entryId}/debt-ack`, {
       method: "POST",
       body: {},
+    })
+  },
+
+  deferDocumentation(
+    entryId: string,
+    reason: string,
+  ): Promise<{ success: true; queueEntryId: string; reason: string; deferredAt: string }> {
+    return apiRequest(`/queue/${entryId}/defer-documentation`, {
+      method: "POST",
+      body: { reason },
     })
   },
 }

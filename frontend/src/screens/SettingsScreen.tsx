@@ -9,9 +9,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { settingsApi, usersApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, Modal, useToast, SkeletonBlock } from "@/components/ui"
+import { useAuth } from "@/auth/AuthContext"
 import { arNum } from "@/lib/format"
 
 export default function SettingsScreen() {
+  const { user, updateName } = useAuth()
   const { notify } = useToast()
   const queryClient = useQueryClient()
 
@@ -68,15 +70,28 @@ export default function SettingsScreen() {
   })
 
   const [showCreate, setShowCreate] = useState(false)
-  const [createForm, setCreateForm] = useState({ name: "", identifier: "", password: "" })
+  const [createForm, setCreateForm] = useState<{
+    name: string
+    identifier: string
+    password: string
+    gender: "MALE" | "FEMALE" | null
+  }>({ name: "", identifier: "", password: "", gender: null })
   const [tempPassword, setTempPassword] = useState<{ name: string; password: string } | null>(null)
 
   const createMutation = useMutation({
-    mutationFn: () => usersApi.createSecretary(createForm),
+    mutationFn: () => {
+      if (!createForm.gender) throw new Error("يجب تحديد الجنس")
+      return usersApi.createSecretary({
+        name: createForm.name.trim(),
+        identifier: createForm.identifier.trim(),
+        password: createForm.password,
+        gender: createForm.gender,
+      })
+    },
     onSuccess: (user) => {
       notify(`أُنشئ حساب ${user.name} — سيتغير لكلمة المرور عند أول دخول`)
       setShowCreate(false)
-      setCreateForm({ name: "", identifier: "", password: "" })
+      setCreateForm({ name: "", identifier: "", password: "", gender: null })
       void queryClient.invalidateQueries({ queryKey: ["users"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
@@ -97,6 +112,24 @@ export default function SettingsScreen() {
     onSuccess: (res, id) => {
       const user = (usersQuery.data?.data ?? []).find((u) => u.id === id)
       setTempPassword({ name: user?.name ?? id.slice(-6), password: res.temporaryPassword })
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const [editingUser, setEditingUser] = useState<{ id: string; name: string } | null>(null)
+  const [editUserName, setEditUserName] = useState("")
+
+  const updateUserMutation = useMutation({
+    mutationFn: async (args: { id: string; name: string }) => {
+      if (args.id === user?.id) {
+        return updateName(args.name)
+      }
+      return usersApi.updateName(args.id, args.name)
+    },
+    onSuccess: (updated) => {
+      notify(`تم تحديث اسم ${updated.name} بنجاح`)
+      setEditingUser(null)
+      void queryClient.invalidateQueries({ queryKey: ["users"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
@@ -218,11 +251,22 @@ export default function SettingsScreen() {
             <div className="data-row" key={u.id} style={{ cursor: "default" }}>
               <strong>{u.name}</strong>
               <span>{u.identifier}</span>
-              <span>{u.role === "DOCTOR" ? "طبيب/ة" : "استقبال"}</span>
+              <span>{u.role === "DOCTOR" ? "طبيب/ة" : (u.gender === "MALE" ? "موظف استقبال" : "موظفة استقبال")}</span>
               <span className={`method-pill ${u.isActive ? "" : "due-text"}`}>
                 {u.isActive ? "نشط" : "معطل"}
               </span>
               <span className="row-actions" style={{ display: "flex", gap: "6px" }}>
+                <button
+                  className="row-action"
+                  onClick={() => {
+                    setEditingUser({ id: u.id, name: u.name })
+                    setEditUserName(u.name)
+                  }}
+                  title="تعديل الاسم"
+                >
+                  تعديل الاسم
+                  <Icon name="edit" size={15} />
+                </button>
                 {u.role === "SECRETARY" && (
                   <>
                     <button
@@ -264,7 +308,8 @@ export default function SettingsScreen() {
               if (
                 createForm.name.trim() &&
                 createForm.identifier.trim() &&
-                createForm.password.length >= 8
+                createForm.password.length >= 8 &&
+                createForm.gender
               ) {
                 createMutation.mutate()
               }
@@ -277,9 +322,36 @@ export default function SettingsScreen() {
               <input
                 value={createForm.name}
                 onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                placeholder="مثال: سارة محمود"
+                placeholder="مثال: سارة محمود أو أحمد علي"
               />
             </label>
+            <div className="field">
+              <span>
+                الجنس (صيغة المخاطبة) <b>*</b>
+              </span>
+              <div style={{ display: "flex", gap: "16px", marginTop: "6px", alignItems: "center" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer", fontWeight: 500 }}>
+                  <input
+                    type="radio"
+                    name="gender"
+                    value="FEMALE"
+                    checked={createForm.gender === "FEMALE"}
+                    onChange={() => setCreateForm({ ...createForm, gender: "FEMALE" })}
+                  />
+                  <span>أنثى (موظفة استقبال)</span>
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer", fontWeight: 500 }}>
+                  <input
+                    type="radio"
+                    name="gender"
+                    value="MALE"
+                    checked={createForm.gender === "MALE"}
+                    onChange={() => setCreateForm({ ...createForm, gender: "MALE" })}
+                  />
+                  <span>ذكر (موظف استقبال)</span>
+                </label>
+              </div>
+            </div>
             <div className="form-row">
               <label className="field">
                 <span>
@@ -288,7 +360,7 @@ export default function SettingsScreen() {
                 <input
                   value={createForm.identifier}
                   onChange={(e) => setCreateForm({ ...createForm, identifier: e.target.value })}
-                  placeholder="مثال: sara"
+                  placeholder="مثال: sara أو ahmed"
                 />
               </label>
               <label className="field">
@@ -309,7 +381,13 @@ export default function SettingsScreen() {
               <AppButton
                 type="submit"
                 icon="userPlus"
-                disabled={createMutation.isPending || createForm.password.length < 8}
+                disabled={
+                  createMutation.isPending ||
+                  createForm.password.length < 8 ||
+                  !createForm.gender ||
+                  !createForm.name.trim() ||
+                  !createForm.identifier.trim()
+                }
               >
                 {createMutation.isPending ? "جارٍ الإنشاء..." : "إنشاء الحساب"}
               </AppButton>
@@ -348,6 +426,47 @@ export default function SettingsScreen() {
               نسخ
             </AppButton>
           </div>
+        </Modal>
+      )}
+
+      {editingUser && (
+        <Modal
+          title="تعديل الاسم"
+          subtitle={`تعديل الاسم المعروض لـ ${editingUser.name}`}
+          onClose={() => setEditingUser(null)}
+        >
+          <form
+            className="modal-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (editUserName.trim() && !updateUserMutation.isPending) {
+                updateUserMutation.mutate({ id: editingUser.id, name: editUserName.trim() })
+              }
+            }}
+          >
+            <label className="field">
+              <span>
+                الاسم الجديد <b>*</b>
+              </span>
+              <input
+                value={editUserName}
+                onChange={(e) => setEditUserName(e.target.value)}
+                placeholder="أدخل الاسم الجديد"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <AppButton variant="outline" type="button" onClick={() => setEditingUser(null)}>
+                إلغاء
+              </AppButton>
+              <AppButton
+                type="submit"
+                disabled={updateUserMutation.isPending || !editUserName.trim()}
+              >
+                {updateUserMutation.isPending ? "جارٍ الحفظ..." : "حفظ التعديل"}
+              </AppButton>
+            </div>
+          </form>
         </Modal>
       )}
     </>

@@ -40,4 +40,11 @@ export const authApi = {
       skipRefresh: true,
     })
   },
+
+  updateName(name: string): Promise<MeDto> {
+    return apiRequest<MeDto>("/auth/me", {
+      method: "PATCH",
+      body: { name },
+    })
+  },
 }

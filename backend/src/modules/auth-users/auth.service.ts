@@ -93,7 +93,7 @@ export interface LoginResult {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly refreshExpiresAt: Date;
-  readonly user: { id: string; name: string; role: 'DOCTOR' | 'SECRETARY' };
+  readonly user: { id: string; name: string; role: 'DOCTOR' | 'SECRETARY'; gender: 'MALE' | 'FEMALE' };
   readonly mustChangePassword: boolean;
 }
 
@@ -127,7 +127,7 @@ export async function login(input: LoginInput, db: PrismaClient = prisma): Promi
   const updated = await db.user.update({
     where: { id: user.id },
     data: { lastLoginAt: new Date() },
-    select: { id: true, name: true, role: true, passwordMustChange: true, lastLoginAt: true },
+    select: { id: true, name: true, role: true, gender: true, passwordMustChange: true, lastLoginAt: true },
   });
   await writeAuthAudit(db, { actorUserId: user.id, actorRole: user.role, action: 'LOGIN' });
   return {

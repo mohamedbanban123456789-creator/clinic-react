@@ -3,9 +3,14 @@ import {
   emergencyToggleSchema,
   reorderSchema,
   waitTimesQuerySchema,
+  deferDocumentationSchema,
 } from '../src/modules/identity-queue/queue.validators.js';
 import { computeEstimatedWaitMin } from '../src/modules/identity-queue/queue.support.js';
+import { normalizeArabic, normalizeName } from '../src/modules/identity-queue/patient.normalize.js';
+import { searchPatients } from '../src/modules/identity-queue/patient.search.js';
+import type { PrismaClient } from '@prisma/client';
 import { AppError } from '../src/common/errors/AppError.js';
+import { toggleEmergency, deferDocumentation } from '../src/modules/identity-queue/queue.service.js';
 
 // ---------------------------------------------------------------------------
 // BE-203 acceptance gate 1: reorder OCC error code carries 409 (STALE_QUEUE).
@@ -126,7 +131,223 @@ import { AppError } from '../src/common/errors/AppError.js';
     computeEstimatedWaitMin({ precedingWaitingCount: 0, avgConsultDurationMin: 20, inConsultation: true, elapsedConsultMin: -5 }),
     20,
   );
+
+  // Fractional elapsed consult minutes must round to an integer (P0-4 fix).
+  const fractionalResult = computeEstimatedWaitMin({
+    precedingWaitingCount: 0,
+    avgConsultDurationMin: 20,
+    inConsultation: true,
+    elapsedConsultMin: 5.465,
+  });
+  assert.equal(fractionalResult, 15, '20 - 5.465 = 14.535 must round to integer 15');
+  assert.equal(Number.isInteger(fractionalResult), true, 'Must be an integer');
+}
+
+// ---------------------------------------------------------------------------
+// P0-3: Arabic normalization tests (bidirectional, alef/taa/yaa, tashkeel)
+// ---------------------------------------------------------------------------
+{
+  // Alef forms equivalence
+  assert.equal(normalizeName('أحمد'), normalizeName('احمد'));
+  assert.equal(normalizeName('إبراهيم'), normalizeName('ابراهيم'));
+  assert.equal(normalizeName('آدم'), normalizeName('ادم'));
+
+  // Yaa and Alef Maksura equivalence
+  assert.equal(normalizeName('ندى'), normalizeName('ندي'));
+  assert.equal(normalizeName('منى'), normalizeName('مني'));
+
+  // Taa Marbuta and Haa equivalence
+  assert.equal(normalizeName('فاطمة'), normalizeName('فاطمه'));
+  assert.equal(normalizeName('سارة'), normalizeName('ساره'));
+
+  // Tashkeel / diacritics stripping
+  assert.equal(normalizeName('مُحَمَّد'), 'محمد');
+  assert.equal(normalizeName('أَحْمَدُ'), 'احمد');
+
+  // Single token matching: "محمد" matches "محمد أحمد"
+  const ptNorm = normalizeName('محمد أحمد علي');
+  const queryNorm1 = normalizeName('محمد');
+  assert.ok(ptNorm.includes(queryNorm1), '"محمد" must match in "محمد أحمد علي"');
+
+  const queryNorm2 = normalizeName('احمد');
+  assert.ok(ptNorm.includes(queryNorm2), '"احمد" must match in "محمد أحمد علي"');
+
+  const queryNorm3 = normalizeName('علي');
+  assert.ok(ptNorm.includes(queryNorm3), '"علي" must match in "محمد أحمد علي"');
+}
+
+// ---------------------------------------------------------------------------
+// P0-3: Token-based patient search query construction & execution
+// ---------------------------------------------------------------------------
+{
+  let capturedWhere: any = null;
+  const mockDb = {
+    patient: {
+      findMany: async (args: any) => {
+        capturedWhere = args.where;
+        return [
+          {
+            id: 'p1',
+            fullName: 'محمد أحمد',
+            dateOfBirth: new Date('1990-01-01'),
+            phoneNorm: '01012345678',
+            nationalIdNorm: '29001011234567',
+            outstandingBalanceMinor: 0,
+            lastVisitAt: null,
+            registrationStatus: 'COMPLETE',
+          },
+        ];
+      },
+    },
+    patientAudit: {
+      create: async () => ({ id: 'aud1' }),
+    },
+  } as unknown as PrismaClient;
+
+  const actor = { userId: 'u-doc', role: 'DOCTOR' as const };
+
+  // Single token search: "محمد"
+  const res1 = await searchPatients('محمد', actor, mockDb);
+  assert.equal(res1.length, 1);
+  assert.ok(capturedWhere.AND[1].OR.length > 0);
+
+  // Multi token search: "احمد محمد"
+  const res2 = await searchPatients('احمد محمد', actor, mockDb);
+  assert.equal(res2.length, 1);
+
+  // Phone search: "010123"
+  const res3 = await searchPatients('010123', actor, mockDb);
+  assert.equal(res3.length, 1);
+
+  // Less than 3 characters returns empty without DB query
+  capturedWhere = null;
+  const resEmpty = await searchPatients('مح', actor, mockDb);
+  assert.equal(resEmpty.length, 0);
+  assert.equal(capturedWhere, null, 'Under 3 chars must not query database');
+}
+
+// ---------------------------------------------------------------------------
+// P1-3: Secretary B unflags Secretary A's emergency flag -> succeeds, audit correct.
+// ---------------------------------------------------------------------------
+{
+  const entry: Record<string, unknown> = {
+    id: 'entry-1',
+    shiftId: 'shift-1',
+    patientId: 'patient-1',
+    status: 'WAITING',
+    position: 1,
+    isEmergency: true,
+    emergencyFlaggedAt: new Date(Date.now() - 3600 * 1000), // Flagged 1 hour ago (past old 120s grace window)
+    emergencyFlaggedByUserId: 'sec-a', // Flagged by Secretary A
+    emergencyReasonCode: 'DOCTOR_DIRECTED',
+    checkedInAt: new Date(Date.now() - 3600 * 1000),
+    calledAt: null,
+    skippedAt: null,
+    completedAt: null,
+    noShowAt: null,
+    abandonAt: null,
+    debtAckAt: null,
+    undoWindowUntil: null,
+    patient: { fullName: 'مريض تجريبي' },
+  };
+
+  const writtenAudits: Array<Record<string, unknown>> = [];
+
+  const txMock = {
+    $queryRaw: async () => [],
+    queueEntry: {
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        Object.assign(entry, args.data);
+        return entry;
+      },
+      findMany: async () => [entry],
+      findUnique: async () => entry,
+    },
+    auditEvent: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        writtenAudits.push(args.data);
+        return { id: 'aud-1' };
+      },
+    },
+    shift: {
+      update: async () => ({ id: 'shift-1', queueVersion: 2 }),
+      findUnique: async () => ({ id: 'shift-1', queueVersion: 2 }),
+    },
+  };
+
+  const mockDb = {
+    shift: {
+      findFirst: async () => ({ id: 'shift-1', queueVersion: 1, status: 'OPEN' }),
+    },
+    queueEntry: {
+      findUnique: async () => entry,
+      findMany: async () => [],
+    },
+    $transaction: async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
+  } as unknown as PrismaClient;
+
+  // Secretary B (sec-b) unflags Secretary A's (sec-a) emergency flag after grace period
+  const actorSecB = { userId: 'sec-b', role: 'SECRETARY' as const };
+  const res = await toggleEmergency('entry-1', { isEmergency: false }, actorSecB, mockDb);
+
+  assert.equal(res.isEmergency, false, 'Entry must be unflagged');
+  assert.equal(entry.isEmergency, false);
+  assert.equal(writtenAudits.length, 1);
+  assert.equal(writtenAudits[0].action, 'EMERGENCY_UNFLAG');
+  assert.equal(writtenAudits[0].actorUserId, 'sec-b');
+  assert.equal(writtenAudits[0].actorRole, 'SECRETARY');
+}
+
+// ---------------------------------------------------------------------------
+// P1-6: Documentation deferral validator & service behavior
+// ---------------------------------------------------------------------------
+{
+  // 1. Validator checks
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'بانتظار الفحوصات' }).success, true);
+  assert.equal(deferDocumentationSchema.safeParse({ reason: '  ab  ' }).success, false, 'Less than 3 chars rejected');
+  assert.equal(deferDocumentationSchema.safeParse({}).success, false, 'Missing reason rejected');
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'x'.repeat(301) }).success, false, 'Over 300 chars rejected');
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'Valid reason', extra: 1 }).success, false, 'Strict');
+
+  // 2. Service checks
+  const writtenAudits: Array<{ action: string; entityType: string; entityId: string; reasonText: string | null; actorRole: string }> = [];
+  const entry = { id: 'entry-defer-1', patientId: 'p-1', shiftId: 'shift-1', status: 'COMPLETED' };
+
+  const mockDb = {
+    queueEntry: {
+      findUnique: async () => entry,
+    },
+    auditEvent: {
+      create: async (args: { data: { action: string; entityType: string; entityId: string; reasonText: string | null; actorRole: string } }) => {
+        writtenAudits.push(args.data);
+        return args.data;
+      },
+    },
+  } as unknown as PrismaClient;
+
+  // Secretary cannot defer documentation
+  await assert.rejects(
+    () => deferDocumentation('entry-defer-1', { reason: 'بانتظار التحاليل الطبية' }, { userId: 'sec-1', role: 'SECRETARY' }, mockDb),
+    (err: unknown) => err instanceof AppError && err.code === 'FORBIDDEN',
+  );
+
+  // Doctor can defer documentation
+  const deferRes = await deferDocumentation(
+    'entry-defer-1',
+    { reason: 'بانتظار التحاليل الطبية' },
+    { userId: 'doc-1', role: 'DOCTOR' },
+    mockDb,
+  );
+
+  assert.equal(deferRes.success, true);
+  assert.equal(deferRes.queueEntryId, 'entry-defer-1');
+  assert.equal(deferRes.reason, 'بانتظار التحاليل الطبية');
+  assert.equal(writtenAudits.length, 1);
+  assert.equal(writtenAudits[0]?.entityType, 'DocumentationDeferral');
+  assert.equal(writtenAudits[0]?.entityId, 'entry-defer-1');
+  assert.equal(writtenAudits[0]?.reasonText, 'بانتظار التحاليل الطبية');
+  assert.equal(writtenAudits[0]?.actorRole, 'DOCTOR');
 }
 
 // eslint-disable-next-line no-console
-console.log('BE-203 reorder/emergency/wait-time validator + formula tests passed.');
+console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search + P1-3 unflag + P1-6 deferral tests passed.');

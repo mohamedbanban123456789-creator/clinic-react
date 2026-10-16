@@ -68,7 +68,7 @@ function ReceiptDetailModal({
   return (
     <Modal
       title="تفاصيل الإيصال"
-      subtitle={`مرجع ${receipt.receiptId.slice(-8).toUpperCase()}`}
+      subtitle={`مرجع ${receipt.receiptId.slice(-6).toUpperCase()}`}
       onClose={onClose}
     >
       <div className="receipt-paper">
@@ -249,7 +249,7 @@ export default function ReceiptsScreen() {
           <p>
             {isDoctor
               ? "ابحث واستعرض تفاصيل كل عملية تحصيل."
-              : "ابحث باسم المريض لعرض سجل إيصالاته (تظهر إيصالات الورديبات المقفلة)."}
+              : "ابحث باسم المريض لعرض سجل إيصالاته."}
           </p>
         </div>
       </div>
@@ -352,7 +352,7 @@ export default function ReceiptsScreen() {
           !receiptsQuery.isError &&
           filtered.length === 0 && (
             <div className="data-row">
-              <span>لا توجد إيصالات بعد — تُعرض إيصالات الوردية بعد إغلاقها.</span>
+              <span>لا توجد إيصالات بعد — تُعرض الإيصالات بعد تسجيلها.</span>
             </div>
           )}
         {filtered.map((r, i) => (
@@ -403,7 +403,7 @@ function ReceiptRow({
   const patientName = patientQuery.data?.fullName ?? receipt.patientId.slice(-6)
   return (
     <button className="data-row" onClick={onOpen}>
-      <strong>{receipt.receiptId.slice(-8).toUpperCase()}</strong>
+      <strong>{receipt.receiptId.slice(-6).toUpperCase()}</strong>
       <span className="patient-cell">
         <span className={`patient-avatar a${index % 4}`}>{patientName.charAt(0)}</span>
         {patientName}

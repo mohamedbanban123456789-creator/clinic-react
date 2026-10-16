@@ -12,7 +12,7 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "lint": "eslint .",
-    "test": "tsx tests/audit-be701.test.ts && tsx tests/billing-be301.test.ts && tsx tests/debt-advisory.test.ts && tsx tests/endpoints-be-remediation.test.ts && tsx tests/queue-be203.test.ts && tsx tests/queue-completion.test.ts && tsx tests/queue-state.test.ts && tsx tests/realtime-be401.test.ts && tsx tests/sanitizer.test.ts && tsx tests/shifts-be304.test.ts && tsx tests/users-guards.test.ts && tsx tests/e2e-reset-guard.test.ts && tsx tests/scribe-gemini.test.ts && tsx tests/supervision-be702.test.ts",
+    "test": "tsx tests/audit-be701.test.ts && tsx tests/billing-be301.test.ts && tsx tests/debt-advisory.test.ts && tsx tests/endpoints-be-remediation.test.ts && tsx tests/queue-be203.test.ts && tsx tests/queue-completion.test.ts && tsx tests/queue-state.test.ts && tsx tests/realtime-be401.test.ts && tsx tests/sanitizer.test.ts && tsx tests/shifts-be304.test.ts && tsx tests/users-guards.test.ts && tsx tests/e2e-reset-guard.test.ts && tsx tests/scribe-gemini.test.ts && tsx tests/supervision-be702.test.ts && tsx tests/call-request.test.ts && tsx tests/post-session-diagnosis.test.ts",
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "test:db": "tsx tests/db/scribe-concurrency-verification.ts && tsx tests/db/run-verifier-twice.ts",
     "format": "prettier --write \"src/**/*.ts\"",

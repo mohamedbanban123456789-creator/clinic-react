@@ -1,5 +1,5 @@
 import { markSecretSafe, type SecretSafe } from '../../common/types/secretSafe.js';
-import type { Role } from '@prisma/client';
+import type { Role, Gender } from '@prisma/client';
 
 export interface ManagedUserDto {
   readonly id: string;
@@ -7,6 +7,7 @@ export interface ManagedUserDto {
   /** Staff login name (doctor-managed roster key; never a secret). */
   readonly identifier: string;
   readonly role: Role;
+  readonly gender: Gender;
   readonly isActive: boolean;
 }
 
@@ -20,6 +21,7 @@ interface ManagedUserLike {
   readonly name: string;
   readonly identifier: string;
   readonly role: Role;
+  readonly gender?: Gender;
   readonly isActive: boolean;
 }
 
@@ -30,6 +32,7 @@ export function toManagedUserDto(user: ManagedUserLike): SecretSafe<ManagedUserD
     name: user.name,
     identifier: user.identifier,
     role: user.role,
+    gender: user.gender ?? 'FEMALE',
     isActive: user.isActive,
   });
 }

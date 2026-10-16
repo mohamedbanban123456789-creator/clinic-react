@@ -4,7 +4,7 @@
  */
 
 export const arNum = (value: number): string =>
-  new Intl.NumberFormat("ar-EG").format(value)
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(Math.round(value))
 
 /** Money label per design language: ج.م. (EGP). */
 export const money = (value: number): string => `${arNum(value)} ج.م.`
@@ -121,3 +121,53 @@ export const arPercent = (part: number, total: number): string => {
   const pct = Math.round((part / total) * 100)
   return `${arNum(pct)}٪`
 }
+
+/**
+ * Bidirectional Arabic character normalization:
+ * - Strip tashkeel / harakat / tatweel
+ * - All alef forms (أ/إ/آ/ٱ) -> ا
+ * - ة and ه -> ه
+ * - ى and ي -> ي
+ */
+export const normalizeArabic = (text: string): string =>
+  text
+    .replace(/[\u064B-\u065F\u0670\u0640\u0610-\u061A\u06D6-\u06ED]/g, "")
+    .replace(/[أإآٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/ى/g, "ي")
+
+/** Normalize free-text names for partial matching and search. */
+export const normalizeName = (raw: string): string => {
+  const arabicNorm = normalizeArabic(raw)
+  const folded = arabicNorm
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+  const kept = folded.replace(/[^a-z0-9\u0600-\u06FF ]/g, " ")
+  return kept.replace(/\s+/g, " ").trim()
+}
+
+/**
+ * Role-aware phone number formatting (Owner decision D2):
+ * - SECRETARY: FULL phone number, right-aligned
+ * - DOCTOR: LAST 4 digits only, right-aligned
+ */
+export const formatPhone = (
+  phone: string | null | undefined,
+  phoneLast4?: string | null | undefined,
+  role?: "DOCTOR" | "SECRETARY",
+): string => {
+  if (role === "DOCTOR") {
+    const l4 = phoneLast4 ?? (phone ? phone.trim().slice(-4) : null)
+    return l4 ? `•••• •${l4}` : "—"
+  }
+  // Secretary sees full number
+  if (phone && phone.trim()) {
+    return phone.trim()
+  }
+  if (phoneLast4) {
+    return `•••• •${phoneLast4}`
+  }
+  return "—"
+}
+
