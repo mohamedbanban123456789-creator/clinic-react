@@ -5,14 +5,14 @@ import { AppError } from '../../common/errors/AppError.js';
 import { hashPassword } from '../../common/utils/hash.js';
 import { revokeUserSessions } from '../../common/realtime.js';
 import { toActivationDto, toManagedUserDto } from './users.dto.js';
-import type { CreateSecretaryInput } from './users.validators.js';
+import type { CreateSecretaryInput, UpdateUserNameInput } from './users.validators.js';
 
 export interface ActorRef {
   readonly userId: string;
   readonly role: 'DOCTOR' | 'SECRETARY';
 }
 
-type UserAuditAction = 'USER_CREATE' | 'USER_ACTIVATE' | 'USER_DEACTIVATE' | 'PASSWORD_CHANGE';
+type UserAuditAction = 'USER_CREATE' | 'USER_UPDATE' | 'USER_ACTIVATE' | 'USER_DEACTIVATE' | 'PASSWORD_CHANGE';
 
 function isUniqueViolation(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
@@ -184,4 +184,29 @@ export async function resetUserPassword(
     entityId: targetId,
   });
   return { temporaryPassword };
+}
+
+export async function updateUserName(
+  targetId: string,
+  input: UpdateUserNameInput,
+  actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<ReturnType<typeof toManagedUserDto>> {
+  const target = await db.user.findUnique({
+    where: { id: targetId },
+    select: { id: true, name: true, role: true, isActive: true },
+  });
+  if (target === null) throw AppError.notFound('User not found');
+  const updated = await db.user.update({
+    where: { id: targetId },
+    data: { name: input.name },
+    select: { id: true, name: true, identifier: true, role: true, gender: true, isActive: true },
+  });
+  await writeUserAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'USER_UPDATE',
+    entityId: target.id,
+  });
+  return toManagedUserDto(updated);
 }

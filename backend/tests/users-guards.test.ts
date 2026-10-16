@@ -7,11 +7,14 @@ import { AppError } from '../src/common/errors/AppError.js';
 import {
   createSecretarySchema,
   resetPasswordSchema,
+  updateUserNameSchema,
   userIdParamSchema,
 } from '../src/modules/auth-users/users.validators.js';
+import { updateMeSchema } from '../src/modules/auth-users/auth.validators.js';
 import { toActivationDto, toManagedUserDto } from '../src/modules/auth-users/users.dto.js';
 import { toMeDto } from '../src/modules/auth-users/auth.dto.js';
-import { getMe } from '../src/modules/auth-users/auth.profile.js';
+import { getMe, updateMe } from '../src/modules/auth-users/auth.profile.js';
+import { updateUserName } from '../src/modules/auth-users/users.service.js';
 import { isSecretSafe } from '../src/common/types/secretSafe.js';
 import type { PrismaClient } from '@prisma/client';
 
@@ -161,6 +164,39 @@ function mockRes(): Response {
   } as unknown as PrismaClient;
   const res = await getMe('u1', db);
   assert.equal({ ...res }.passwordMustChange, true, '/auth/me response carries passwordMustChange');
+}
+
+/** P1-12: Editable names — own name via updateMe, any user name via updateUserName. */
+{
+  assert.equal(updateMeSchema.safeParse({ name: 'د. سامي المحدث' }).success, true);
+  assert.equal(updateMeSchema.safeParse({ name: '' }).success, false);
+  assert.equal(updateUserNameSchema.safeParse({ name: 'أحمد محمود' }).success, true);
+  assert.equal(updateUserNameSchema.safeParse({ name: '   ' }).success, false);
+
+  let auditCreated = false;
+  const mockDb = {
+    user: {
+      findUnique: (args: { where: { id: string } }): Promise<Record<string, unknown> | null> =>
+        Promise.resolve({ id: args.where.id, name: 'قديم', role: 'SECRETARY', gender: 'MALE', isActive: true, passwordMustChange: false, lastLoginAt: null }),
+      update: (args: { where: { id: string }; data: { name: string } }): Promise<Record<string, unknown>> =>
+        Promise.resolve({ id: args.where.id, name: args.data.name, identifier: 'sec1', role: 'SECRETARY', gender: 'MALE', isActive: true, passwordMustChange: false, lastLoginAt: null }),
+    },
+    auditEvent: {
+      create: (): Promise<void> => {
+        auditCreated = true;
+        return Promise.resolve();
+      },
+    },
+  } as unknown as PrismaClient;
+
+  const updatedMe = await updateMe('u1', { name: 'الاسم الجديد' }, mockDb);
+  assert.equal(updatedMe.name, 'الاسم الجديد');
+  assert.equal(auditCreated, true);
+
+  auditCreated = false;
+  const updatedUser = await updateUserName('u2', { name: 'الموظف المحدث' }, { userId: 'u-doc', role: 'DOCTOR' }, mockDb);
+  assert.equal(updatedUser.name, 'الموظف المحدث');
+  assert.equal(auditCreated, true);
 }
 
 // eslint-disable-next-line no-console

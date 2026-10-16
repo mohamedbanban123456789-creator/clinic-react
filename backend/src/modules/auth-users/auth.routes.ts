@@ -2,8 +2,8 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { authenticate, requireAuth } from '../../common/middleware/authenticate.js';
 import { validate } from '../../common/middleware/validate.js';
 import { REFRESH_COOKIE_NAME, REFRESH_COOKIE_PATH, isCookieSecure } from '../../config/auth.js';
-import { changePasswordSchema, loginSchema } from './auth.validators.js';
-import { changePassword, getMe } from './auth.profile.js';
+import { changePasswordSchema, loginSchema, updateMeSchema } from './auth.validators.js';
+import { changePassword, getMe, updateMe } from './auth.profile.js';
 import { login } from './auth.service.js';
 import { logout, refresh } from './auth.session.js';
 
@@ -63,6 +63,17 @@ authRouter.get('/me', authenticate, (req: Request, res: Response, next: NextFunc
     .then((me) => res.status(200).json(me))
     .catch(next);
 });
+
+authRouter.patch(
+  '/me',
+  authenticate,
+  validate(updateMeSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    updateMe(requireAuth(req).userId, req.body as { name: string })
+      .then((me) => res.status(200).json(me))
+      .catch(next);
+  },
+);
 
 authRouter.post(
   '/change-password',

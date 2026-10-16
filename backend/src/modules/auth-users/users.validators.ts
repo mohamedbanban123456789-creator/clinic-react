@@ -24,5 +24,10 @@ export const userIdParamSchema = z.object({
 
 export const resetPasswordSchema = z.object({}).strict();
 
+export const updateUserNameSchema = z.object({
+  name: nonBlank('name', 120),
+});
+
 export type CreateSecretaryInput = z.infer<typeof createSecretarySchema>;
 export type UserIdParam = z.infer<typeof userIdParamSchema>;
+export type UpdateUserNameInput = z.infer<typeof updateUserNameSchema>;

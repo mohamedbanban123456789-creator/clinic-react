@@ -9,9 +9,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { settingsApi, usersApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, Modal, useToast, SkeletonBlock } from "@/components/ui"
+import { useAuth } from "@/auth/AuthContext"
 import { arNum } from "@/lib/format"
 
 export default function SettingsScreen() {
+  const { user, updateName } = useAuth()
   const { notify } = useToast()
   const queryClient = useQueryClient()
 
@@ -110,6 +112,24 @@ export default function SettingsScreen() {
     onSuccess: (res, id) => {
       const user = (usersQuery.data?.data ?? []).find((u) => u.id === id)
       setTempPassword({ name: user?.name ?? id.slice(-6), password: res.temporaryPassword })
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const [editingUser, setEditingUser] = useState<{ id: string; name: string } | null>(null)
+  const [editUserName, setEditUserName] = useState("")
+
+  const updateUserMutation = useMutation({
+    mutationFn: async (args: { id: string; name: string }) => {
+      if (args.id === user?.id) {
+        return updateName(args.name)
+      }
+      return usersApi.updateName(args.id, args.name)
+    },
+    onSuccess: (updated) => {
+      notify(`تم تحديث اسم ${updated.name} بنجاح`)
+      setEditingUser(null)
+      void queryClient.invalidateQueries({ queryKey: ["users"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
@@ -236,6 +256,17 @@ export default function SettingsScreen() {
                 {u.isActive ? "نشط" : "معطل"}
               </span>
               <span className="row-actions" style={{ display: "flex", gap: "6px" }}>
+                <button
+                  className="row-action"
+                  onClick={() => {
+                    setEditingUser({ id: u.id, name: u.name })
+                    setEditUserName(u.name)
+                  }}
+                  title="تعديل الاسم"
+                >
+                  تعديل الاسم
+                  <Icon name="edit" size={15} />
+                </button>
                 {u.role === "SECRETARY" && (
                   <>
                     <button
@@ -395,6 +426,47 @@ export default function SettingsScreen() {
               نسخ
             </AppButton>
           </div>
+        </Modal>
+      )}
+
+      {editingUser && (
+        <Modal
+          title="تعديل الاسم"
+          subtitle={`تعديل الاسم المعروض لـ ${editingUser.name}`}
+          onClose={() => setEditingUser(null)}
+        >
+          <form
+            className="modal-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (editUserName.trim() && !updateUserMutation.isPending) {
+                updateUserMutation.mutate({ id: editingUser.id, name: editUserName.trim() })
+              }
+            }}
+          >
+            <label className="field">
+              <span>
+                الاسم الجديد <b>*</b>
+              </span>
+              <input
+                value={editUserName}
+                onChange={(e) => setEditUserName(e.target.value)}
+                placeholder="أدخل الاسم الجديد"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <AppButton variant="outline" type="button" onClick={() => setEditingUser(null)}>
+                إلغاء
+              </AppButton>
+              <AppButton
+                type="submit"
+                disabled={updateUserMutation.isPending || !editUserName.trim()}
+              >
+                {updateUserMutation.isPending ? "جارٍ الحفظ..." : "حفظ التعديل"}
+              </AppButton>
+            </div>
+          </form>
         </Modal>
       )}
     </>

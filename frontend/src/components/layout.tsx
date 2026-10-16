@@ -8,8 +8,9 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { Icon, type IconName, useToast } from "@/components/ui"
+import { AppButton, Icon, type IconName, Modal, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { apiErrorMessage } from "@/api/client"
 import { arToday } from "@/lib/format"
 import { secretaryRoleTitle } from "@/lib/constants"
 import { onIntercom } from "@/realtime/socket"
@@ -74,7 +75,8 @@ function getSafeName(name: string | null | undefined, isDoctor: boolean, gender?
 }
 
 export function Sidebar() {
-  const { user, logout } = useAuth()
+  const { user, logout, updateName } = useAuth()
+  const { notify } = useToast()
   const location = useLocation()
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
@@ -82,6 +84,10 @@ export function Sidebar() {
   const displayName = getSafeName(user?.name, isDoctor, user?.gender)
   const initial = getInitial(displayName)
   const roleLabel = isDoctor ? "طبيب/ة نفسية" : secretaryRoleTitle(user?.gender)
+
+  const [showEditName, setShowEditName] = useState(false)
+  const [newName, setNewName] = useState("")
+  const [nameBusy, setNameBusy] = useState(false)
 
   return (
     <aside className="sidebar">
@@ -122,8 +128,22 @@ export function Sidebar() {
       </nav>
       <div className="sidebar-profile">
         <div className="avatar">{initial}</div>
-        <div>
-          <strong>{displayName}</strong>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <strong
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px", cursor: "pointer" }}
+            onClick={() => {
+              setNewName(user?.name || displayName)
+              setShowEditName(true)
+            }}
+            title="تعديل الاسم"
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {displayName}
+            </span>
+            <span style={{ opacity: 0.7, flexShrink: 0, display: "inline-flex" }}>
+              <Icon name="edit" size={13} />
+            </span>
+          </strong>
           <small>{roleLabel}</small>
         </div>
         <button
@@ -134,6 +154,50 @@ export function Sidebar() {
           <Icon name="logout" size={18} />
         </button>
       </div>
+
+      {showEditName && (
+        <Modal
+          title="تعديل اسم العرض"
+          subtitle="سيظهر هذا الاسم في لوحة التحكم والمحادثات والتقارير."
+          onClose={() => setShowEditName(false)}
+        >
+          <form
+            className="modal-form"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!newName.trim() || nameBusy) return
+              setNameBusy(true)
+              try {
+                await updateName(newName.trim())
+                notify("تم تحديث الاسم بنجاح")
+                setShowEditName(false)
+              } catch (err) {
+                notify(apiErrorMessage(err), "error")
+              } finally {
+                setNameBusy(false)
+              }
+            }}
+          >
+            <label className="field">
+              <span>الاسم <b>*</b></span>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="أدخل الاسم الجديد"
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <AppButton variant="outline" type="button" onClick={() => setShowEditName(false)}>
+                إلغاء
+              </AppButton>
+              <AppButton type="submit" disabled={nameBusy || !newName.trim()}>
+                {nameBusy ? "جارٍ الحفظ..." : "حفظ التعديل"}
+              </AppButton>
+            </div>
+          </form>
+        </Modal>
+      )}
     </aside>
   )
 }

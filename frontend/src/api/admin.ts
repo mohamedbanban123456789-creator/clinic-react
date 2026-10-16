@@ -54,6 +54,13 @@ export const usersApi = {
       body: {},
     })
   },
+
+  updateName(id: string, name: string): Promise<UserListItemDto> {
+    return apiRequest(`/users/${id}`, {
+      method: "PATCH",
+      body: { name },
+    })
+  },
 }
 
 export const supervisionApi = {

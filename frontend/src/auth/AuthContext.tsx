@@ -33,6 +33,7 @@ interface AuthContextValue {
     oldPassword: string,
     newPassword: string,
   ) => Promise<void>
+  updateName: (name: string) => Promise<MeDto>
   /** Force a session re-check (e.g. after password change elsewhere). */
   reload: () => Promise<void>
 }
@@ -109,6 +110,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [adoptUser],
   )
 
+  const updateName = useCallback(
+    async (name: string): Promise<MeDto> => {
+      const updated = await authApi.updateName(name.trim())
+      adoptUser(updated)
+      return updated
+    },
+    [adoptUser],
+  )
+
   const reload = useCallback(async () => {
     try {
       const me = await authApi.me()
@@ -119,8 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [adoptUser])
 
   const value = useMemo(
-    () => ({ user, status, login, logout, changePassword, reload }),
-    [user, status, login, logout, changePassword, reload],
+    () => ({ user, status, login, logout, changePassword, updateName, reload }),
+    [user, status, login, logout, changePassword, updateName, reload],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

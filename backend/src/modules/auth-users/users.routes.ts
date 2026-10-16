@@ -5,10 +5,12 @@ import { validate } from '../../common/middleware/validate.js';
 import {
   createSecretarySchema,
   resetPasswordSchema,
+  updateUserNameSchema,
   userIdParamSchema,
   type CreateSecretaryInput,
+  type UpdateUserNameInput,
 } from './users.validators.js';
-import { createSecretary, listUsers, resetUserPassword, setUserActive } from './users.service.js';
+import { createSecretary, listUsers, resetUserPassword, setUserActive, updateUserName } from './users.service.js';
 
 export const usersRouter: Router = Router();
 
@@ -67,6 +69,19 @@ usersRouter.post(
     const params = req.params as { id: string };
     resetUserPassword(params.id, { userId: auth.userId, role: auth.role })
       .then((out) => res.status(200).json(out))
+      .catch(next);
+  },
+);
+
+usersRouter.patch(
+  ['/:id', '/:id/name'],
+  validate(userIdParamSchema, 'params'),
+  validate(updateUserNameSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { id: string };
+    updateUserName(params.id, req.body as UpdateUserNameInput, { userId: auth.userId, role: auth.role })
+      .then((user) => res.status(200).json(user))
       .catch(next);
   },
 );
