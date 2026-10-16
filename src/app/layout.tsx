@@ -29,7 +29,10 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <span data-live-marker="9431" hidden />
+        {children}
+      </body>
     </html>
   );
 }

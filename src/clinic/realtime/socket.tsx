@@ -109,7 +109,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       const token = getAccessToken()
       if (!token || disposed) return null
       const socket = io({
-        path: "/socket.io",
+        // /clinic-socket.io (not /socket.io): the public preview gateway
+        // reserves /socket.io/* for the platform (502). The Next.js rewrite
+        // in next.config.ts maps this prefix to Express :4000/socket.io/*.
+        path: "/clinic-socket.io",
         auth: { token },
         withCredentials: true,
         reconnection: true,

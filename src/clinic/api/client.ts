@@ -2,14 +2,14 @@
  * Centralized API client — the ONLY place that talks HTTP to the backend.
  *
  * - Access JWT lives in memory only (never localStorage; the refresh cookie
- *   path is /api/v1/auth and restores the session on reload).
+ *   is scoped to /clinic-api/v1/auth and restores the session on reload).
  * - Every 401 triggers one silent refresh + retry.
  * - 403 PASSWORD_CHANGE_REQUIRED routes the user to the password screen.
  * - Idempotency-Key (uuid v4) is generated for cash-critical mutations.
  * - Errors are normalized to ApiError { code, message, details, status }.
  */
 
-const BASE = "/api/v1"
+const BASE = "/clinic-api/v1"
 
 export class ApiError extends Error {
   readonly code: string
