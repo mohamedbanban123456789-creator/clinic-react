@@ -203,30 +203,54 @@ export function Conversation({
   )
 }
 
+import { useChat } from "@/context/ChatContext"
+
 export function FloatingChat({
-  open,
-  setOpen,
-  onComplimentary,
+  open: propOpen,
+  setOpen: propSetOpen,
+  onComplimentary: propOnComplimentary,
 }: {
-  open: boolean
-  setOpen: (v: boolean) => void
+  open?: boolean
+  setOpen?: (v: boolean) => void
   onComplimentary?: () => void
-}) {
+} = {}) {
+  const chatContext = useChat()
+  const open = propOpen !== undefined ? propOpen : chatContext.chatOpen
+  const setOpen = propSetOpen !== undefined ? propSetOpen : chatContext.setChatOpen
+  const onComplimentary = propOnComplimentary ?? chatContext.onComplimentary
+  const unreadCount = chatContext.unreadCount
+
+  const { user } = useAuth()
+  const isDoctor = user?.role === "DOCTOR"
+  const partnerLabel = isDoctor ? "الاستقبال" : "الطبيب"
+
   return (
     <div className={open ? "floating-chat open" : "floating-chat"}>
       {open && (
         <div className="floating-panel">
-          <button className="close-chat" onClick={() => setOpen(false)}>
+          <button
+            type="button"
+            className="close-chat"
+            onClick={() => setOpen(false)}
+            aria-label="إغلاق المحادثة"
+          >
             ×
           </button>
           <Conversation onComplimentary={onComplimentary} />
         </div>
       )}
-      <button className="chat-toggle" onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="chat-toggle"
+        onClick={() => chatContext.toggleChat()}
+        aria-label="المحادثة الفورية"
+      >
         <Icon name="message" />
-        <span>الاستقبال</span>
+        <span>{partnerLabel}</span>
+        {unreadCount > 0 && <span className="chat-badge">{unreadCount}</span>}
         <i />
       </button>
     </div>
   )
 }
+

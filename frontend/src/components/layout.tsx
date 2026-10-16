@@ -7,13 +7,14 @@
  */
 
 import { useEffect, useMemo, useState } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import { AppButton, Icon, type IconName, Modal, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useChat } from "@/context/ChatContext"
+import { FloatingChat } from "@/components/Conversation"
 import { apiErrorMessage } from "@/api/client"
 import { arToday } from "@/lib/format"
 import { secretaryRoleTitle } from "@/lib/constants"
-import { onIntercom } from "@/realtime/socket"
 
 interface NavItem {
   to: string
@@ -35,7 +36,6 @@ const secretaryNav: { section: string; items: NavItem[] }[] = [
   {
     section: "التشغيل",
     items: [
-      { to: "/chat", label: "التواصل الداخلي", icon: "message", match: ["/chat"] },
       { to: "/secretary/closing", label: "الإغلاق اليومي", icon: "chart", match: ["/secretary/closing"] },
       { to: "/display", label: "شاشة الانتظار", icon: "building", match: ["/display"] },
     ],
@@ -204,6 +204,7 @@ export function Sidebar() {
 
 export function Header({ title }: { title: string }) {
   const { user } = useAuth()
+  const { toggleChat, unreadCount } = useChat()
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
@@ -245,10 +246,16 @@ export function Header({ title }: { title: string }) {
           <Icon name="calendar" size={17} />
           <span>{arToday()}</span>
         </div>
-        <Link to="/chat" className="icon-button notification" title="الإشعارات">
+        <button
+          type="button"
+          className="icon-button notification"
+          title="التواصل الداخلي والإشعارات"
+          onClick={toggleChat}
+          style={{ cursor: "pointer" }}
+        >
           <Icon name="bell" size={19} />
-          <i />
-        </Link>
+          {unreadCount > 0 && <span className="notification-badge">{unreadCount}</span>}
+        </button>
         <button
           className="mini-profile"
           onClick={() => navigate(isDoctor ? "/doctor" : "/secretary")}
@@ -267,19 +274,6 @@ export function Header({ title }: { title: string }) {
 }
 
 export function AppShell({ title, children }: { title: string; children: React.ReactNode }) {
-  const { notify } = useToast()
-  const { user } = useAuth()
-
-  useEffect(() => {
-    return onIntercom((msg) => {
-      if (msg.fromUserId !== user?.id) {
-        const sender = msg.fromRole === "DOCTOR" ? "الطبيب/ة" : "الاستقبال"
-        const snippet = msg.text ? (msg.text.length > 50 ? `${msg.text.slice(0, 50)}…` : msg.text) : "إشعار جديد"
-        notify(`رسالة من ${sender}: ${snippet}`)
-      }
-    })
-  }, [user?.id, notify])
-
   return (
     <div className="app" dir="rtl">
       <Sidebar />
@@ -287,6 +281,8 @@ export function AppShell({ title, children }: { title: string; children: React.R
         <Header title={title} />
         <main className="page">{children}</main>
       </div>
+      <FloatingChat />
     </div>
   )
 }
+

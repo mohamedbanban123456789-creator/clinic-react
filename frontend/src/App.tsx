@@ -14,6 +14,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { AuthProvider, useAuth } from "@/auth/AuthContext"
 import { RealtimeProvider } from "@/realtime/socket"
 import { ToastProvider, useToast } from "@/components/ui"
+import { ChatProvider } from "@/context/ChatContext"
 import { AppShell } from "@/components/layout"
 import { routeTitle } from "@/lib/constants"
 
@@ -119,7 +120,8 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <RealtimeProvider>
-            <Routes>
+            <ChatProvider>
+              <Routes>
               <Route path="/login" element={<LoginScreen />} />
               <Route
                 path="/change-password"
@@ -193,9 +195,7 @@ export default function App() {
                 path="/chat"
                 element={
                   <RequireAuth>
-                    <ShellRoute>
-                      <ChatScreen />
-                    </ShellRoute>
+                    <Navigate to="/" replace />
                   </RequireAuth>
                 }
               />
@@ -318,6 +318,7 @@ export default function App() {
               <Route path="/" element={<HomeRedirect />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            </ChatProvider>
           </RealtimeProvider>
         </AuthProvider>
       </ToastProvider>

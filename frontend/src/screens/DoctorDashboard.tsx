@@ -16,7 +16,7 @@ import { billingApi } from "@/api/billing"
 import { patientsApi } from "@/api/patients"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
-import { FloatingChat } from "@/components/Conversation"
+import { useChat } from "@/context/ChatContext"
 import { useCallRequest } from "@/realtime/socket"
 import { arNum, arTimer, arDate, ageFromDob, arAgo, moneyMinor } from "@/lib/format"
 import { emergencyReasonLabel } from "@/lib/constants"
@@ -198,9 +198,14 @@ export default function DoctorDashboard() {
   const queryClient = useQueryClient()
   const { queue, entries, isLoading, queueVersion } = useQueue()
   const invalidate = useQueueInvalidation()
-  const [chatOpen, setChatOpen] = useState(false)
+  const { setOnComplimentary } = useChat()
   const [showComplimentary, setShowComplimentary] = useState(false)
   const [showReviewModal, setShowReviewModal] = useState(false)
+
+  useEffect(() => {
+    setOnComplimentary(() => () => setShowComplimentary(true))
+    return () => setOnComplimentary(undefined)
+  }, [setOnComplimentary])
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -568,11 +573,6 @@ export default function DoctorDashboard() {
         </aside>
       </div>
 
-      <FloatingChat
-        open={chatOpen}
-        setOpen={setChatOpen}
-        onComplimentary={() => setShowComplimentary(true)}
-      />
 
       {showReviewModal && (
         <ReviewModal

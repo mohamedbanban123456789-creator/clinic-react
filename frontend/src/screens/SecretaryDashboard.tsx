@@ -17,6 +17,7 @@ import { settingsApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, StatCard, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useChat } from "@/context/ChatContext"
 import { useCallRequest } from "@/realtime/socket"
 import {
   arGreeting,
@@ -43,6 +44,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function SecretaryDashboard() {
   const navigate = useNavigate()
+  const { openChat } = useChat()
   const { notify } = useToast()
   const { user } = useAuth()
   const { queue, entries, isLoading, isError, error, queueVersion } = useQueue()
@@ -462,7 +464,7 @@ export default function SecretaryDashboard() {
                   }
                 } else if (patient.status === "IN_CONSULTATION") {
                   if (isDoctor) completeMutation.mutate(patient)
-                  else navigate("/chat")
+                  else openChat()
                 }
               }
               const primaryLabel =
@@ -662,7 +664,7 @@ export default function SecretaryDashboard() {
                 </div>
               </div>
             )}
-            <AppButton variant="outline" icon="message" onClick={() => navigate("/chat")}>
+            <AppButton variant="outline" icon="message" onClick={openChat}>
               إبلاغ الطبيب
             </AppButton>
           </section>
