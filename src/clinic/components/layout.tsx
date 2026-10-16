@@ -6,13 +6,16 @@
  * administrative shortcut into the clinic-operations area.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AppButton, Icon, type IconName, Modal, useToast } from "@/clinic/components/ui"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { useChat } from "@/clinic/context/ChatContext"
 import { FloatingChat } from "@/clinic/components/Conversation"
 import { apiErrorMessage } from "@/clinic/api/client"
+import { shiftsApi } from "@/clinic/api/shifts"
+import { settingsApi } from "@/clinic/api/admin"
 import { arToday } from "@/clinic/lib/format"
 import { secretaryRoleTitle } from "@/clinic/lib/constants"
 
@@ -56,7 +59,7 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
     section: "الصلاحيات الإدارية",
     items: [
       { to: "/doctor/reports", label: "التقارير الإشرافية والمالية", icon: "chart", match: ["/doctor/reports"] },
-      { to: "/doctor/settings", label: "الإعدادات والمستخدمون", icon: "lock", match: ["/doctor/settings"] },
+      { to: "/doctor/settings", label: "الإعدادات والمستخدمون", icon: "settings", match: ["/doctor/settings"] },
     ],
   },
 ]
@@ -72,6 +75,47 @@ function getSafeName(name: string | null | undefined, isDoctor: boolean, gender?
     return isDoctor ? "د. أحمد سامي" : (gender === "MALE" ? "أحمد محمود" : "سارة محمود")
   }
   return name.trim()
+}
+
+/**
+ * Silent auto-workday guard (Owner decision): the clinic workday (shift) opens
+ * automatically and silently — no button, no manual step, no "no open shift"
+ * messages. Daily closing stays untouched: the backend rejects re-opening a
+ * business date that already has a shift, so attempts after a close fail
+ * quietly and the closed report remains.
+ */
+function AutoWorkday() {
+  const queryClient = useQueryClient()
+  const shiftQuery = useQuery({
+    queryKey: ["shifts", "current"],
+    queryFn: () => shiftsApi.current(),
+    refetchInterval: 60_000,
+  })
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => settingsApi.get(),
+    staleTime: 5 * 60_000,
+  })
+  const lastAttemptRef = useRef(0)
+
+  useEffect(() => {
+    if (shiftQuery.data !== null || shiftQuery.isFetching) return
+    const now = Date.now()
+    if (now - lastAttemptRef.current < 90_000) return
+    lastAttemptRef.current = now
+    const openingFloat = settingsQuery.data?.openingFloatMinor ?? 0
+    void shiftsApi
+      .open(openingFloat)
+      .then(async () => {
+        await queryClient.invalidateQueries({ queryKey: ["shifts"] })
+        await queryClient.invalidateQueries({ queryKey: ["queue"] })
+      })
+      .catch(() => {
+        /* silent — already-open race or closed business date is expected */
+      })
+  }, [shiftQuery.data, shiftQuery.isFetching, settingsQuery.data, queryClient])
+
+  return null
 }
 
 export function Sidebar() {
@@ -281,15 +325,6 @@ export function AppShell({ title, children }: { title: string; children: React.R
 
   return (
     <>
-      {/* Serene aurora mesh background — purely decorative (ZIP 2 Aurora) */}
-      <div className="aurora-layer" aria-hidden="true">
-        <span className="aurora-mesh m1" />
-        <span className="aurora-mesh m2" />
-        <span className="aurora-mesh m3" />
-        <span className="aurora-mesh m4" />
-        <span className="aurora-mesh m5" />
-        <span className="aurora-watermark">سكينة</span>
-      </div>
       <div className={`app ${navOpen ? "nav-open" : ""}`} dir="rtl">
         <Sidebar />
         {navOpen && (
@@ -305,6 +340,7 @@ export function AppShell({ title, children }: { title: string; children: React.R
           <main className="page">{children}</main>
         </div>
         <FloatingChat />
+        <AutoWorkday />
       </div>
     </>
   )

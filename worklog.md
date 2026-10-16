@@ -71,3 +71,63 @@ Stage Summary:
 - All four mission areas delivered: typography/contrast (WCAG AA/AAA), glassmorphism + GPU (blur <= 12px,
   filter-free aurora), responsive (360-1440 clean, 44px touch), performance (code splitting, isolated timers)
 - Deliverables: scripts/contrast_audit.py, contrast_validate.py, apply_css_polish(.2).py, screenshots in download/
+
+---
+Task ID: 6
+Agent: main (Super Z)
+Task: Continuation design review — project-wide systemic fixes (watermark, icons, sidebar,
+currency, dates, semantic colors, spelling, mobile header, login fit, shift-system removal,
+navy background + calm glass) + fresh before/after screenshots + full regression sweep
+
+Work Log:
+- Surveyed latest build via VLM on fresh BEFORE screenshots (login/dash/settings/patients/
+  session/mobile360/secretary): confirmed watermark "سكينة" + white pills (letter dots),
+  lock icon on Settings nav, USD currency in DB, red revenue card, saturated stat icon tiles,
+  tri-hue teal→blue→purple primary button
+- A1 Watermark: removed aurora-layer div (mesh blobs + watermark span) from AppShell and all
+  .aurora-* CSS + login-page ::before/::after orbs + reduced-motion override; sidebar brand kept
+- A2 Icons: new "settings" gear icon in ui.tsx icon map (nav now gear, was lock); pill icon
+  redrawn as unambiguous horizontal capsule + mid divider; single family/stroke 1.7 kept
+- A3 Sidebar: nav { min-height:0; overflow-y:auto; overscroll-behavior:contain }, brand +
+  sidebar-profile { flex-shrink:0 } — verified 244px gap, no overlap at 1440x900 AND 1280x620
+  (profile pinned, nav scrolls internally)
+- A4 Currency: PUT /settings currency USD->EGP (DB now EGP everywhere; UI money() is ج.م.)
+- A5 Dates: built ArabicDateField component (dd/mm/yyyy Arabic-Indic digits, typing auto-format,
+  Sat-first Arabic month-grid popover, today/clear, maxToday for DOB) replacing the native
+  mm/dd/yyyy date input in CheckInScreen; round-trip verified ٢٢/٠٣/١٩٩٢ -> 1992-03-22
+- A6 Semantic: secretary "إيراد اليوم" tone coral->mint (green); total visits violet->blue;
+  reports violet->blue; closing violet->blue; red now reserved for danger only
+- A7 Text: hero "العيادة تعمل بهدوء اليوم"->"تسير العيادة بهدوء اليوم"; patients empty-state
+  noise line replaced with search hint; NO_OPEN_SHIFT error message made neutral (no shift
+  wording); "لا مرضى في الانتظار"/chat empty text verified already correct in code
+- A8 Mobile header: ≤1024 grid two rows [toggle|title|bell] + [search|profile] via
+  display:contents; verified 360/390/768 — title fully visible, zero overlap, no h-overflow
+- A9 Login/ChangePassword: removed overflow:hidden (short screens scroll), compact tiers at
+  max-height 760/620 (inputs 40px, paddings 18-26px); both cards fit fully at 600px viewport
+- B Shift system: removed freshDay branch, "فتح يوم عمل جديد" button + openMutation from
+  ClosingScreen; removed "لا وردية مفتوحة" from ReportsScreen; added silent AutoWorkday guard
+  in AppShell (polls current 60s, opens with settings openingFloat, catches 409 silently,
+  90s cooldown) — proven via network log: after close, GET current 404 -> POST open 409 (closed
+  business date) with ZERO user-visible message; fresh business date opens automatically
+  (simulated 2026-10-17 open via same endpoint); daily closing flow untouched and re-verified
+  end-to-end (closed a day with reason, report shows عجز correctly)
+- C Colors: --page-bg neutral navy oklch(0.165 0.025 250) + single top gradient (#0B1220
+  fallback); glass hue 220->250 at 76%; borders 0.08-0.12 tokens; top-lights 0.45-0.7 -> 0.22-0.34;
+  stat/med/safety/ai icon tiles -> neutral glass + colored icon (no saturated gradients);
+  primary button -> single teal gradient; avatars/call-icon/record-core/chat bubble -> teal
+  two-tone; display screen -> navy; 13px typography floor (72 rules bumped)
+- Regression sweep (doctor + secretary live sessions, zero console/page errors):
+  patient registration with new date picker -> check-in -> doctor call request -> secretary
+  approval -> manual session -> SOAP fill/save/sign -> visit completion -> 500 EGP cash payment
+  + receipt modal -> receipts archive; intercom chat BOTH directions < 2s; change-password flow
+  via temp account (created + deactivated after test); all routes visually re-verified
+- Contrast: resolved REAL rendered colors via browser SVG engine — rose text 13.2:1 on glass
+  (AAA); body/muted 10+:1; the old audit script's oklch->sRGB converter is buggy (noted)
+- Deliverables: download/review2/ before-* (7), after-* (17), comparisons/ (7 side-by-side)
+- Scripts persisted: scripts/apply_review2_css.py, scripts/make_comparisons.py
+
+Stage Summary:
+- All review items A1-A10, B, C, D(kept), E(no watermark/manual-shift/unrequested changes) done
+- App fully functional end-to-end after changes; QA DB state: 10-16 closed (عجز), 10-17 OPEN
+- Open question for owner: reception discount ceiling fields (secretaryMaxDiscount) are ACTIVELY
+  used by backend billing/reconciliation — left in Settings, awaiting removal decision

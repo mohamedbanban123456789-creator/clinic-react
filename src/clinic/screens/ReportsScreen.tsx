@@ -111,7 +111,7 @@ export default function ReportsScreen() {
           <span>
             <small>حالة الوردية الحالية</small>
             <strong>
-              {shiftQuery.data?.status === "OPEN" ? "مفتوحة" : "لا وردية مفتوحة"}
+              {shiftQuery.data?.status === "OPEN" ? "مفتوحة" : "جارٍ التحديث..."}
             </strong>
           </span>
         </div>
@@ -160,7 +160,7 @@ export default function ReportsScreen() {
                   suffix="ج.م."
                   hint={arPercent(cashPart, gross || 1)}
                   icon="chart"
-                  tone="violet"
+                  tone="blue"
                 />
                 <StatCard
                   label="مصروفات نثرية"

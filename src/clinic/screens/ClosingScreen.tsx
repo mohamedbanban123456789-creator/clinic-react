@@ -163,11 +163,8 @@ export default function ClosingScreen() {
     : undefined
 
   const current = shiftQuery.data
-  // Fresh day: no live shift, nothing just closed, nothing to reopen —
-  // the secretary must OPEN the day with a starting float. (Previously the
-  // open mutation was orphaned: no button ever called it, blocking the
-  // whole clinic day because check-in requires an open shift.)
-  const freshDay = !current && !closeResult && !latestClosed
+  // Workday auto-opens silently (AutoWorkday in the shared shell) — this
+  // screen only reports and closes; there is no manual open step anymore.
   const isOpen = current ? current.status === "OPEN" : !closeResult && !latestClosed
 
   // Report shiftId: live shift, or the just-closed one (after close,
@@ -194,17 +191,6 @@ export default function ClosingScreen() {
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
     }
   }, [closeResult, queryClient])
-
-  const openMutation = useMutation({
-    mutationFn: () => shiftsApi.open(Math.round(actual * 100)),
-    onSuccess: (shift) => {
-      notify(`تم فتح اليوم ${arDate(shift.businessDate)} — الطابور جاهز`)
-      setActual(0)
-      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
-      void queryClient.invalidateQueries({ queryKey: ["queue"] })
-    },
-    onError: (err) => notify(apiErrorMessage(err), "error"),
-  })
 
   const reopenMutation = useMutation({
     mutationFn: () => shiftsApi.reopen(reportShiftId),
@@ -320,9 +306,7 @@ export default function ClosingScreen() {
                 ? reportShift.status === "OPEN"
                   ? "مفتوح للتحصيل"
                   : `مقفلة — ${shiftResultLabel[reportShift.result ?? ""] ?? ""}`
-                : freshDay
-                  ? "يوم جديد — بانتظار الافتتاح"
-                  : "مقفلة"}
+                : "مقفلة"}
             </strong>
           </span>
         </div>
@@ -334,7 +318,7 @@ export default function ClosingScreen() {
           value={arNum(summaryQuery.data?.totalServed ?? aggregates.served)}
           hint={isOpen ? "فواتير اليوم الحالية" : "إجمالي مرضى اليوم"}
           icon="users"
-          tone="violet"
+          tone="blue"
         />
         <StatCard
           label="الإيراد المسجل"
@@ -447,7 +431,7 @@ export default function ClosingScreen() {
             </span>
             <Icon name="arrow" />
             <label className="field money-field">
-              <span>{freshDay ? "رصيد افتتاح الصندوق" : "النقد الفعلي المعدود"}</span>
+              <span>النقد الفعلي المعدود</span>
               <input
                 type="number"
                 value={closedReport ? closedReport.actualCountedMinor / 100 : actual}
@@ -493,26 +477,13 @@ export default function ClosingScreen() {
                 : "يعتمد النظام العد الأعمى: يبقى المتوقع مخفيًا حتى إدخال العد الفعلي."}
             </p>
           </div>
-          {(isOpen || freshDay) && !freshDay && (
+          {isOpen && (
             <AppButton
               icon="lock"
               onClick={() => setConfirmClose(true)}
               disabled={actual < 0}
             >
               مراجعة واعتماد الإغلاق
-            </AppButton>
-          )}
-          {freshDay && (
-            <AppButton
-              icon="arrow"
-              onClick={() => openMutation.mutate()}
-              disabled={openMutation.isPending || actual < 0}
-            >
-              {openMutation.isPending
-                ? "جارٍ فتح اليوم..."
-                : actual > 0
-                  ? `فتح يوم عمل جديد برصيد ${moneyMinor(Math.round(actual * 100))}`
-                  : "فتح يوم عمل جديد (بدون رصيد افتتاحي)"}
             </AppButton>
           )}
           {!isOpen && (

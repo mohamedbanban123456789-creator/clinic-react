@@ -434,7 +434,7 @@ export default function DoctorDashboard() {
               : "مسودات وزيارات غير موثقة"
           }
           icon="sparkle"
-          tone="violet"
+          tone="blue"
         />
         <StatCard
           label="متوسط الجلسة"

@@ -1,0 +1,701 @@
+     1→/**
+     2→ * Daily closing — design preserved, mapped to the real blind-cash contract:
+     3→ *  - Open shift (POST /shifts/open) with a blind physical opening count.
+     4→ *  - Petty expenses/injections (POST /shifts/:id/petty).
+     5→ *  - Reconciliation: expected cash stays hidden while OPEN (server rule);
+     6→ *    entering the actual count + closing reveals expected/difference/result.
+     7→ *  - Post-close: full summary, payment-method donut, and doctor review/ack.
+     8→ */
+     9→
+    10→import { useEffect, useMemo, useState } from "react"
+    11→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+    12→import { shiftsApi } from "@/clinic/api/shifts"
+    13→import { supervisionApi } from "@/clinic/api/admin"
+    14→import { useShiftInvoices } from "@/clinic/hooks/useShiftInvoices"
+    15→import { apiErrorMessage, ApiError } from "@/clinic/api/client"
+    16→import { AppButton, Icon, Modal, StatCard, useToast } from "@/clinic/components/ui"
+    17→import { useAuth } from "@/clinic/auth/AuthContext"
+    18→import { useQueue } from "@/clinic/hooks/useQueue"
+    19→import { arNum, arDate, arTime, moneyMinor, arPercent } from "@/clinic/lib/format"
+    20→import { pettyDirectionLabel, shiftResultLabel } from "@/clinic/lib/constants"
+    21→import type { CloseShiftDto } from "@/clinic/api/types"
+    22→
+    23→function AddPettyModal({
+    24→  shiftId,
+    25→  onClose,
+    26→}: {
+    27→  shiftId: string
+    28→  onClose: () => void
+    29→}) {
+    30→  const { notify } = useToast()
+    31→  const queryClient = useQueryClient()
+    32→  const [form, setForm] = useState({
+    33→    direction: "EXPENSE",
+    34→    category: "",
+    35→    description: "",
+    36→    amount: "",
+    37→  })
+    38→
+    39→  const mutation = useMutation({
+    40→    mutationFn: () =>
+    41→      shiftsApi.addPetty(shiftId, {
+    42→        amountMinor: Math.round(Number(form.amount) * 100),
+    43→        direction: form.direction as "EXPENSE" | "INJECTION",
+    44→        category: form.category.trim() || "تشغيلي",
+    45→        description: form.description.trim(),
+    46→      }),
+    47→    onSuccess: (petty) => {
+    48→      notify(`تم تسجيل ${pettyDirectionLabel[petty.direction]} بقيمة ${moneyMinor(petty.amountMinor)}`)
+    49→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+    50→      onClose()
+    51→    },
+    52→    onError: (err) => notify(apiErrorMessage(err), "error"),
+    53→  })
+    54→
+    55→  return (
+    56→    <Modal
+    57→      title="إضافة مصروف / إيداع نثري"
+    58→      subtitle="يُسجل البند في سجل اليوم."
+    59→      onClose={onClose}
+    60→    >
+    61→      <form
+    62→        className="modal-form"
+    63→        onSubmit={(e) => {
+    64→          e.preventDefault()
+    65→          if (Number(form.amount) > 0 && form.description.trim()) mutation.mutate()
+    66→        }}
+    67→      >
+    68→        <div className="form-row">
+    69→          <label className="field">
+    70→            <span>النوع</span>
+    71→            <select
+    72→              value={form.direction}
+    73→              onChange={(e) => setForm({ ...form, direction: e.target.value })}
+    74→            >
+    75→              <option value="EXPENSE">مصروف</option>
+    76→              <option value="INJECTION">إيداع نقدي</option>
+    77→            </select>
+    78→          </label>
+    79→          <label className="field money-field">
+    80→            <span>المبلغ</span>
+    81→            <input
+    82→              type="number"
+    83→              value={form.amount}
+    84→              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+    85→            />
+    86→            <i>ج.م.</i>
+    87→          </label>
+    88→        </div>
+    89→        <div className="form-row">
+    90→          <label className="field">
+    91→            <span>الفئة</span>
+    92→            <input
+    93→              value={form.category}
+    94→              onChange={(e) => setForm({ ...form, category: e.target.value })}
+    95→              placeholder="مثال: مستلزمات مكتبية"
+    96→            />
+    97→          </label>
+    98→          <label className="field">
+    99→            <span>الوصف</span>
+   100→            <input
+   101→              value={form.description}
+   102→              onChange={(e) => setForm({ ...form, description: e.target.value })}
+   103→              placeholder="وصف قصير للبند"
+   104→            />
+   105→          </label>
+   106→        </div>
+   107→        <div className="modal-actions">
+   108→          <AppButton variant="outline" type="button" onClick={onClose}>
+   109→            إلغاء
+   110→          </AppButton>
+   111→          <AppButton
+   112→            type="submit"
+   113→            icon="plus"
+   114→            disabled={mutation.isPending || Number(form.amount) <= 0 || !form.description.trim()}
+   115→          >
+   116→            {mutation.isPending ? "جارٍ الحفظ..." : "تسجيل البند"}
+   117→          </AppButton>
+   118→        </div>
+   119→      </form>
+   120→    </Modal>
+   121→  )
+   122→}
+   123→
+   124→export default function ClosingScreen() {
+   125→  const { notify } = useToast()
+   126→  const { user } = useAuth()
+   127→  const isDoctor = user?.role === "DOCTOR"
+   128→  const queryClient = useQueryClient()
+   129→
+   130→  const [actual, setActual] = useState(0)
+   131→  const [showAddPetty, setShowAddPetty] = useState(false)
+   132→  const [confirmClose, setConfirmClose] = useState(false)
+   133→  const [confirmAck, setConfirmAck] = useState(false)
+   134→  const [closeReason, setCloseReason] = useState("")
+   135→  const [closeResult, setCloseResult] = useState<CloseShiftDto | null>(null)
+   136→
+   137→  const { entries: queueEntries } = useQueue()
+   138→  const waitingPatients = useMemo(
+   139→    () => (queueEntries ?? []).filter((e) => e.status === "WAITING" || e.status === "IN_CONSULTATION"),
+   140→    [queueEntries],
+   141→  )
+   142→
+   143→  const shiftQuery = useQuery({
+   144→    queryKey: ["shifts", "current"],
+   145→    queryFn: () => shiftsApi.current(),
+   146→    refetchInterval: 60_000,
+   147→  })
+   148→
+   149→  // Latest closed shift for the post-close report (fallback when just closed).
+   150→  // Supervision feeds are DOCTOR-only; secretaries see the open-shift form.
+   151→  const closedShiftsQuery = useQuery({
+   152→    queryKey: ["supervision", "shifts"],
+   153→    queryFn: () => supervisionApi.shifts({ limit: 10 }),
+   154→    enabled: isDoctor,
+   155→  })
+   156→
+   157→  // Doctor post-close view: latest CLOSED shift (from the supervision feed)
+   158→  // when no live shift exists — enables review/ack on a fresh page load.
+   159→  const latestClosed = isDoctor
+   160→    ? (closedShiftsQuery.data?.data ?? []).find(
+   161→        (s) => s.status === "CLOSED" && s.reviewedAt === null,
+   162→      ) ?? (closedShiftsQuery.data?.data ?? []).find((s) => s.status === "CLOSED")
+   163→    : undefined
+   164→
+   165→  const current = shiftQuery.data
+   166→  // Fresh day: no live shift, nothing just closed, nothing to reopen —
+   167→  // the secretary must OPEN the day with a starting float. (Previously the
+   168→  // open mutation was orphaned: no button ever called it, blocking the
+   169→  // whole clinic day because check-in requires an open shift.)
+   170→  const freshDay = !current && !closeResult && !latestClosed
+   171→  const isOpen = current ? current.status === "OPEN" : !closeResult && !latestClosed
+   172→
+   173→  // Report shiftId: live shift, or the just-closed one (after close,
+   174→  // GET /shifts/current 404s — "No open shift").
+   175→  const reportShiftId = current?.shiftId ?? closeResult?.shiftId ?? latestClosed?.shiftId
+   176→
+   177→  const pettyQuery = useQuery({
+   178→    queryKey: ["shifts", "petty", reportShiftId ?? "none"],
+   179→    queryFn: () => shiftsApi.pettyList(reportShiftId!),
+   180→    enabled: Boolean(reportShiftId),
+   181→  })
+   182→
+   183→  const invoicesQuery = useShiftInvoices(reportShiftId)
+   184→
+   185→  const summaryQuery = useQuery({
+   186→    queryKey: ["shifts", "summary", reportShiftId ?? "none"],
+   187→    queryFn: () => shiftsApi.summary(reportShiftId!),
+   188→    enabled: Boolean(reportShiftId),
+   189→  })
+   190→
+   191→  useEffect(() => {
+   192→    if (closeResult) {
+   193→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+   194→      void queryClient.invalidateQueries({ queryKey: ["billing"] })
+   195→    }
+   196→  }, [closeResult, queryClient])
+   197→
+   198→  const openMutation = useMutation({
+   199→    mutationFn: () => shiftsApi.open(Math.round(actual * 100)),
+   200→    onSuccess: (shift) => {
+   201→      notify(`تم فتح اليوم ${arDate(shift.businessDate)} — الطابور جاهز`)
+   202→      setActual(0)
+   203→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+   204→      void queryClient.invalidateQueries({ queryKey: ["queue"] })
+   205→    },
+   206→    onError: (err) => notify(apiErrorMessage(err), "error"),
+   207→  })
+   208→
+   209→  const reopenMutation = useMutation({
+   210→    mutationFn: () => shiftsApi.reopen(reportShiftId),
+   211→    onSuccess: () => {
+   212→      setCloseResult(null)
+   213→      notify("تمت إعادة فتح اليوم بنجاح")
+   214→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+   215→      void queryClient.invalidateQueries({ queryKey: ["billing"] })
+   216→      void queryClient.invalidateQueries({ queryKey: ["queue"] })
+   217→    },
+   218→    onError: (err) => notify(apiErrorMessage(err), "error"),
+   219→  })
+   220→
+   221→  const closeMutation = useMutation({
+   222→    mutationFn: () => {
+   223→      const reason = closeReason.trim()
+   224→      const hasWaiting = waitingPatients.length > 0
+   225→      return shiftsApi.close(reportShiftId || "current", Math.round(actual * 100), {
+   226→        force: hasWaiting || reason.length > 0,
+   227→        ...(reason ? { forceReason: reason, reason } : {}),
+   228→      })
+   229→    },
+   230→    onSuccess: (result) => {
+   231→      setCloseResult(result)
+   232→      setConfirmClose(false)
+   233→      notify("تم إغلاق الخزينة وحفظ تقرير اليوم")
+   234→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+   235→      void queryClient.invalidateQueries({ queryKey: ["billing"] })
+   236→      void queryClient.invalidateQueries({ queryKey: ["receipts"] })
+   237→      void queryClient.invalidateQueries({ queryKey: ["queue"] })
+   238→    },
+   239→    onError: (err) => {
+   240→      notify(apiErrorMessage(err), "error")
+   241→    },
+   242→  })
+   243→
+   244→  const ackMutation = useMutation({
+   245→    mutationFn: (note: string) => supervisionApi.ackShift(reportShiftId!, note || undefined),
+   246→    onSuccess: () => {
+   247→      notify("تم اعتماد مراجعة اليوم")
+   248→      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+   249→    },
+   250→    onError: (err) => notify(apiErrorMessage(err), "error"),
+   251→  })
+   252→
+   253→  /* ----------------------- Live aggregates ----------------------- */
+   254→
+   255→  const aggregates = useMemo(() => {
+   256→    const invoices = invoicesQuery.invoices ?? []
+   257→    const collected = invoices.reduce((s, i) => s + i.collectedMinor, 0)
+   258→    const served = invoices.length
+   259→    const pettyRows = pettyQuery.data?.data ?? []
+   260→    const pettyTotal = pettyRows.reduce((s, p) => s + p.amountMinor, 0)
+   261→    return { collected, served, pettyTotal, pettyRows }
+   262→  }, [invoicesQuery.invoices, pettyQuery.data])
+   263→
+   264→  // Report shift view: live shift, or a GET /shifts/:id fetch for the
+   265→  // just-closed one (businessDate and post-close figures).
+   266→  const reportShiftQuery = useQuery({
+   267→    queryKey: ["shifts", "report", reportShiftId ?? "none"],
+   268→    queryFn: () => shiftsApi.get(reportShiftId!),
+   269→    enabled: !current && Boolean(reportShiftId),
+   270→  })
+   271→  const reportShift = current ?? reportShiftQuery.data
+   272→  const businessDate = reportShift?.businessDate ?? new Date().toISOString()
+   273→
+   274→  const closeReportFrom = (
+   275→    s: typeof current,
+   276→  ): CloseShiftDto | null =>
+   277→    !isOpen && s && s.status === "CLOSED"
+   278→      ? {
+   279→          shiftId: s.shiftId,
+   280→          status: "CLOSED",
+   281→          expectedCashMinor: s.expectedCashMinor ?? 0,
+   282→          actualCountedMinor: s.actualCountedMinor ?? 0,
+   283→          differenceMinor: s.differenceMinor ?? 0,
+   284→          result: s.result ?? "BALANCED",
+   285→          integrityCheckPassed: s.integrityCheckPassed ?? true,
+   286→          queueVersion: s.queueVersion,
+   287→        }
+   288→      : null
+   289→
+   290→  const closedReport: CloseShiftDto | null =
+   291→    closeResult ??
+   292→    closeReportFrom(current) ??
+   293→    closeReportFrom(latestClosed as typeof current)
+   294→
+   295→  const byMethod = summaryQuery.data?.byMethod ?? null
+   296→  const gross = byMethod
+   297→    ? byMethod.CASH + byMethod.OTHER
+   298→    : aggregates.collected
+   299→  const cashPart = byMethod ? byMethod.CASH : gross
+   300→  const otherPart = byMethod ? byMethod.OTHER : 0
+   301→  const cashPct = gross > 0 ? (cashPart / gross) * 100 : 0
+   302→  const otherPct = gross > 0 ? (otherPart / gross) * 100 : 0
+   303→
+   304→  /* ----------------------------- View ----------------------------- */
+   305→
+   306→  return (
+   307→    <>
+   308→      <section className="closing-top">
+   309→        <div>
+   310→          <span className="section-kicker">{arDate(businessDate)}</span>
+   311→          <h2>التقرير المالي لنهاية اليوم</h2>
+   312→          <p>راجع المصروفات وطابق الخزينة قبل اعتماد الإغلاق.</p>
+   313→        </div>
+   314→        <div className="closing-status">
+   315→          <span className="live-dot" style={{ display: isOpen ? undefined : "none" }} />
+   316→          <span>
+   317→            <small>حالة اليوم</small>
+   318→            <strong>
+   319→              {reportShift
+   320→                ? reportShift.status === "OPEN"
+   321→                  ? "مفتوح للتحصيل"
+   322→                  : `مقفلة — ${shiftResultLabel[reportShift.result ?? ""] ?? ""}`
+   323→                : freshDay
+   324→                  ? "يوم جديد — بانتظار الافتتاح"
+   325→                  : "مقفلة"}
+   326→            </strong>
+   327→          </span>
+   328→        </div>
+   329→      </section>
+   330→
+   331→      <section className="stats-grid four">
+   332→        <StatCard
+   333→          label="زيارات اليوم"
+   334→          value={arNum(summaryQuery.data?.totalServed ?? aggregates.served)}
+   335→          hint={isOpen ? "فواتير اليوم الحالية" : "إجمالي مرضى اليوم"}
+   336→          icon="users"
+   337→          tone="violet"
+   338→        />
+   339→        <StatCard
+   340→          label="الإيراد المسجل"
+   341→          value={arNum((summaryQuery.data?.grossCollectedMinor ?? aggregates.collected) / 100)}
+   342→          suffix="ج.م."
+   343→          hint={
+   344→            isOpen
+   345→              ? "محصّل حتى الآن (الفواتير)"
+   346→              : byMethod
+   347→                ? "عبر نقدية وطرق أخرى"
+   348→                : "إجمالي التحصيل"
+   349→          }
+   350→          icon="wallet"
+   351→          tone="mint"
+   352→        />
+   353→        <StatCard
+   354→          label="المصروفات النثرية"
+   355→          value={arNum((summaryQuery.data?.pettyTotalMinor ?? aggregates.pettyTotal) / 100)}
+   356→          suffix="ج.م."
+   357→          hint={`${arNum(aggregates.pettyRows.length)} بند مسجل`}
+   358→          icon="receipt"
+   359→          tone="amber"
+   360→        />
+   361→        <StatCard
+   362→          label={isOpen ? "صافي نقدي مبدئي" : "صافي النقدية"}
+   363→          value={arNum(
+   364→            ((summaryQuery.data?.cashCollectedMinor ?? cashPart) -
+   365→              (summaryQuery.data?.pettyExpenseMinor ?? aggregates.pettyRows
+   366→                .filter((p) => p.direction === "EXPENSE")
+   367→                .reduce((s, p) => s + p.amountMinor, 0))) / 100,
+   368→          )}
+   369→          suffix="ج.م."
+   370→          hint={isOpen ? "تقديري — يُثبّت عند الإغلاق" : "بعد المصروفات النقدية"}
+   371→          icon="chart"
+   372→          tone="blue"
+   373→        />
+   374→      </section>
+   375→
+   376→      <div className="closing-grid">
+   377→        <section className="card expenses-card">
+   378→          <div className="card-header">
+   379→            <div>
+   380→              <h3>المصروفات النثرية</h3>
+   381→              <p>المصروفات والإيداعات النقدية المسجلة اليوم.</p>
+   382→            </div>
+   383→            {isOpen && (
+   384→              <AppButton variant="secondary" icon="plus" onClick={() => setShowAddPetty(true)}>
+   385→                إضافة مصروف
+   386→              </AppButton>
+   387→            )}
+   388→          </div>
+   389→          <div className="expense-list">
+   390→            {aggregates.pettyRows.length === 0 && <span>لا بنود مسجلة بعد.</span>}
+   391→            {aggregates.pettyRows.map((p) => (
+   392→              <span key={p.pettyId}>
+   393→                <i className="expense-icon">
+   394→                  <Icon name={p.direction === "INJECTION" ? "wallet" : "receipt"} size={17} />
+   395→                </i>
+   396→                <b>
+   397→                  {p.category} — {p.description}
+   398→                </b>
+   399→                <small>{arTime(p.createdAt)}</small>
+   400→                <strong>
+   401→                  {p.direction === "INJECTION" ? "+ " : ""}
+   402→                  {moneyMinor(p.amountMinor)}
+   403→                </strong>
+   404→              </span>
+   405→            ))}
+   406→          </div>
+   407→          <div className="expense-total">
+   408→            <span>إجمالي البنود</span>
+   409→            <strong>{moneyMinor(aggregates.pettyTotal)}</strong>
+   410→          </div>
+   411→        </section>
+   412→
+   413→        <section className="card reconciliation">
+   414→          <div className="card-header">
+   415→            <div>
+   416→              <h3>مطابقة الخزينة النقدية</h3>
+   417→              <p>
+   418→                {isOpen
+   419→                  ? "قارن النقد الفعلي بالمبلغ المسجل — يُكشف المتوقع عند الإغلاق (عد أعمى)."
+   420→                  : "نتيجة المطابقة النهائية لليوم."}
+   421→              </p>
+   422→            </div>
+   423→            <span
+   424→              className={`recon-badge ${
+   425→                closedReport
+   426→                  ? closedReport.differenceMinor === 0
+   427→                    ? "exact"
+   428→                    : "short"
+   429→                  : "short"
+   430→              }`}
+   431→            >
+   432→              {closedReport
+   433→                ? closedReport.differenceMinor === 0
+   434→                  ? "متطابق"
+   435→                  : closedReport.differenceMinor < 0
+   436→                    ? "يوجد عجز"
+   437→                    : "يوجد زيادة"
+   438→                : "بانتظار الإغلاق"}
+   439→            </span>
+   440→          </div>
+   441→          <div className="recon-values">
+   442→            <span>
+   443→              <small>النقد المسجل بالنظام</small>
+   444→              <strong>
+   445→                {closedReport ? moneyMinor(closedReport.expectedCashMinor) : "مخفي حتى الإغلاق"}
+   446→              </strong>
+   447→            </span>
+   448→            <Icon name="arrow" />
+   449→            <label className="field money-field">
+   450→              <span>{freshDay ? "رصيد افتتاح الصندوق" : "النقد الفعلي المعدود"}</span>
+   451→              <input
+   452→                type="number"
+   453→                value={closedReport ? closedReport.actualCountedMinor / 100 : actual}
+   454→                onChange={(e) => setActual(Number(e.target.value))}
+   455→                disabled={!isOpen}
+   456→              />
+   457→              <i>ج.م.</i>
+   458→            </label>
+   459→          </div>
+   460→          <div
+   461→            className={`difference-box ${
+   462→              closedReport ? (closedReport.differenceMinor === 0 ? "exact" : "") : ""
+   463→            }`}
+   464→          >
+   465→            <span>
+   466→              <Icon
+   467→                name={
+   468→                  closedReport
+   469→                    ? closedReport.differenceMinor === 0
+   470→                      ? "check"
+   471→                      : "alert"
+   472→                    : "clock"
+   473→                }
+   474→              />
+   475→              <span>
+   476→                <small>نتيجة المطابقة</small>
+   477→                <strong>
+   478→                  {closedReport
+   479→                    ? closedReport.differenceMinor === 0
+   480→                      ? "الخزينة متطابقة تمامًا"
+   481→                      : `${
+   482→                          closedReport.differenceMinor < 0 ? "عجز" : "زيادة"
+   483→                        } بقيمة ${moneyMinor(Math.abs(closedReport.differenceMinor))}`
+   484→                    : "سيتم احتساب الفرق تلقائيًا عند الإغلاق"}
+   485→                </strong>
+   486→              </span>
+   487→            </span>
+   488→            <p>
+   489→              {closedReport
+   490→                ? closedReport.integrityCheckPassed
+   491→                  ? "فحص السلامة المالية ناجح — لا توجد مخالفات."
+   492→                  : "راجع تنبيهات السلامة في التقارير الإشرافية."
+   493→                : "يعتمد النظام العد الأعمى: يبقى المتوقع مخفيًا حتى إدخال العد الفعلي."}
+   494→            </p>
+   495→          </div>
+   496→          {(isOpen || freshDay) && !freshDay && (
+   497→            <AppButton
+   498→              icon="lock"
+   499→              onClick={() => setConfirmClose(true)}
+   500→              disabled={actual < 0}
+   501→            >
+   502→              مراجعة واعتماد الإغلاق
+   503→            </AppButton>
+   504→          )}
+   505→          {freshDay && (
+   506→            <AppButton
+   507→              icon="arrow"
+   508→              onClick={() => openMutation.mutate()}
+   509→              disabled={openMutation.isPending || actual < 0}
+   510→            >
+   511→              {openMutation.isPending
+   512→                ? "جارٍ فتح اليوم..."
+   513→                : actual > 0
+   514→                  ? `فتح يوم عمل جديد برصيد ${moneyMinor(Math.round(actual * 100))}`
+   515→                  : "فتح يوم عمل جديد (بدون رصيد افتتاحي)"}
+   516→            </AppButton>
+   517→          )}
+   518→          {!isOpen && (
+   519→            <div style={{ display: "flex", gap: "0.75rem", marginTop: "1rem", flexWrap: "wrap" }}>
+   520→              <AppButton
+   521→                variant="secondary"
+   522→                icon="arrow"
+   523→                onClick={() => reopenMutation.mutate()}
+   524→                disabled={reopenMutation.isPending}
+   525→              >
+   526→                {reopenMutation.isPending ? "جارٍ إعادة الفتح..." : "إعادة فتح اليوم"}
+   527→              </AppButton>
+   528→              {isDoctor && reportShift && reportShift.result !== null && reportShift.reviewedAt === null && (
+   529→                <AppButton icon="check" onClick={() => ackMutation.mutate("تمت المراجعة")}>
+   530→                  اعتماد مراجعة اليوم (طبيب)
+   531→                </AppButton>
+   532→              )}
+   533→            </div>
+   534→          )}
+   535→        </section>
+   536→      </div>
+   537→
+   538→      <section className="card report-chart">
+   539→        <div className="card-header">
+   540→          <div>
+   541→            <h3>توزيع الإيراد حسب طريقة الدفع</h3>
+   542→            <p>
+   543→              {isOpen
+   544→                ? "تقديري من فواتير اليوم الجارية."
+   545→                : "إجمالي محصل اليوم (مسجل)."}
+   546→            </p>
+   547→          </div>
+   548→          <select defaultValue="today" disabled title="يعرض تعاملات اليوم">
+   549→            <option value="today">اليوم الحالي</option>
+   550→          </select>
+   551→        </div>
+   552→        <div className="chart-body">
+   553→          <div
+   554→            className="donut"
+   555→            style={{
+   556→              background: `conic-gradient(var(--primary) 0 ${cashPct}%, var(--teal) ${cashPct}% ${
+   557→                cashPct + otherPct
+   558→              }%, var(--blue) ${cashPct + otherPct}% 100%)`,
+   559→            }}
+   560→          >
+   561→            <div>
+   562→              <strong>{arNum(gross / 100)}</strong>
+   563→              <small>ج.م.</small>
+   564→            </div>
+   565→          </div>
+   566→          <div className="chart-legend">
+   567→            <span>
+   568→              <i className="legend-indigo" />
+   569→              <b>نقدي</b>
+   570→              <small>{moneyMinor(cashPart)}</small>
+   571→              <em>{arPercent(cashPart, gross || 1)}</em>
+   572→            </span>
+   573→            <span>
+   574→              <i className="legend-teal" />
+   575→              <b>أخرى (Vodafone / InstaPay)</b>
+   576→              <small>{moneyMinor(otherPart)}</small>
+   577→              <em>{arPercent(otherPart, gross || 1)}</em>
+   578→            </span>
+   579→            <span>
+   580→              <i className="legend-blue" />
+   581→              <b>عكس عمليات</b>
+   582→              <small>{moneyMinor(summaryQuery.data?.reversalsMinor ?? 0)}</small>
+   583→              <em>—</em>
+   584→            </span>
+   585→          </div>
+   586→        </div>
+   587→      </section>
+   588→
+   589→      {showAddPetty && current && (
+   590→        <AddPettyModal shiftId={current.shiftId} onClose={() => setShowAddPetty(false)} />
+   591→      )}
+   592→
+   593→      {confirmClose && current && (
+   594→        <Modal
+   595→          title="اعتماد إغلاق اليوم"
+   596→          subtitle="هذا الإجراء يثبت أرقام الخزينة والتقرير المالي."
+   597→          onClose={() => setConfirmClose(false)}
+   598→        >
+   599→          <div className="confirm-visual">
+   600→            <span>
+   601→              <Icon name="lock" size={28} />
+   602→            </span>
+   603→            <h3>هل راجعت كل العمليات؟</h3>
+   604→            <p>
+   605→              بعد الاعتماد لن يمكن تعديل المصروفات أو التحصيلات إلا بصلاحية الطبيب
+   606→              الإدارية.
+   607→            </p>
+   608→          </div>
+   609→
+   610→          {waitingPatients.length > 0 && (
+   611→            <div
+   612→              style={{
+   613→                margin: "1rem 0",
+   614→                padding: "0.9rem",
+   615→                borderRadius: "14px",
+   616→                background: "oklch(0.8 0.15 90 / 0.14)",
+   617→                border: "1px solid oklch(0.8 0.15 90 / 0.5)",
+   618→                textAlign: "right",
+   619→              }}
+   620→            >
+   621→              <div
+   622→                style={{
+   623→                  display: "flex",
+   624→                  alignItems: "center",
+   625→                  gap: "0.5rem",
+   626→                  fontWeight: "bold",
+   627→                  color: "oklch(0.9 0.11 90)",
+   628→                  marginBottom: "0.5rem",
+   629→                }}
+   630→              >
+   631→                <Icon name="alert" size={20} />
+   632→                <span>
+   633→                  تحذير: يوجد {arNum(waitingPatients.length)} مريض في قائمة الانتظار لم تكتمل زيارتهم بعد!
+   634→                </span>
+   635→              </div>
+   636→              <ul style={{ margin: "0 1.25rem 0.5rem 0", padding: 0, fontSize: "14px", color: "oklch(0.9 0.11 90)" }}>
+   637→                {waitingPatients.map((p) => (
+   638→                  <li key={p.entryId} style={{ margin: "0.3rem 0" }}>
+   639→                    <b style={{ color: "var(--text-strong)" }}>{p.displayName}</b> — {p.status === "IN_CONSULTATION" ? "في غرفة الكشف حاليًا" : "في انتظار الدخول"}
+   640→                  </li>
+   641→                ))}
+   642→              </ul>
+   643→              <label className="field" style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+   644→                <span style={{ fontSize: "13.5px", fontWeight: "bold", color: "oklch(0.92 0.1 90)" }}>
+   645→                  سبب إغلاق اليوم مع وجود مرضى بالانتظار (مطلوب):
+   646→                </span>
+   647→                <input
+   648→                  value={closeReason}
+   649→                  onChange={(e) => setCloseReason(e.target.value)}
+   650→                  placeholder="اكتب سبب الإغلاق (مثال: اعتذار المرضى / انتهاء موعد العمل بالعيادة)..."
+   651→                  style={{
+   652→                    width: "100%",
+   653→                    padding: "11px 13px",
+   654→                    borderRadius: "12px",
+   655→                    border: "1px solid oklch(0.8 0.15 90 / 0.6)",
+   656→                    fontSize: "14px",
+   657→                    background: "oklch(0.25 0.03 280 / 0.55)",
+   658→                    color: "var(--text-strong)",
+   659→                  }}
+   660→                />
+   661→              </label>
+   662→            </div>
+   663→          )}
+   664→
+   665→          <div className="confirm-summary">
+   666→            <span>
+   667→              النقد الفعلي المعدود <b>{moneyMinor(Math.round(actual * 100))}</b>
+   668→            </span>
+   669→            <span>
+   670→              إجمالي التحصيل الجاري <b>{moneyMinor(aggregates.collected)}</b>
+   671→            </span>
+   672→          </div>
+   673→          <label className="check-label">
+   674→            <input
+   675→              type="checkbox"
+   676→              checked={confirmAck}
+   677→              onChange={(e) => setConfirmAck(e.target.checked)}
+   678→            />
+   679→            <span>أؤكد أنني راجعت النقد الفعلي وسبب أي فارق.</span>
+   680→          </label>
+   681→          <div className="modal-actions">
+   682→            <AppButton variant="outline" onClick={() => setConfirmClose(false)}>
+   683→              العودة للمراجعة
+   684→            </AppButton>
+   685→            <AppButton
+   686→              onClick={() => closeMutation.mutate()}
+   687→              disabled={
+   688→                closeMutation.isPending ||
+   689→                !confirmAck ||
+   690→                (waitingPatients.length > 0 && closeReason.trim().length < 3)
+   691→              }
+   692→            >
+   693→              {closeMutation.isPending ? "جارٍ الإغلاق..." : "اعتماد وإغلاق اليوم"}
+   694→            </AppButton>
+   695→          </div>
+   696→        </Modal>
+   697→      )}
+   698→    </>
+   699→  )
+   700→}
+   701→

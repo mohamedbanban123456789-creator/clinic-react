@@ -270,7 +270,7 @@ export default function SecretaryDashboard() {
             {arGreeting()}، {firstName}
           </span>
           <h2>
-            العيادة تعمل بهدوء اليوم
+            تسير العيادة بهدوء اليوم
           </h2>
           <p>
             {stats.waiting.length > 0
@@ -302,7 +302,7 @@ export default function SecretaryDashboard() {
           value={arNum(stats.total)}
           hint="إجمالي سجلات الطابور اليوم"
           icon="users"
-          tone="violet"
+          tone="blue"
         />
         <StatCard
           label="في الانتظار"
@@ -335,7 +335,7 @@ export default function SecretaryDashboard() {
           suffix="ج.م."
           hint="محصّل من فواتير اليوم"
           icon="wallet"
-          tone="coral"
+          tone="mint"
         />
       </section>
 

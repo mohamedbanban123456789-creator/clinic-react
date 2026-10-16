@@ -106,7 +106,7 @@ export default function PatientsBrowserScreen() {
         <div className="search-hint">
           <Icon name="users" size={34} />
           <h3>ابدأ بكتابة بيانات المريض</h3>
-          <p>الملف السريري (السجل الزمني، التقارير، الأدوية) متاح لحساب الطبيب فقط.</p>
+          <p>اكتب اسم المريض أو رقم هاتفه لعرض ملفه.</p>
         </div>
       )}
     </section>

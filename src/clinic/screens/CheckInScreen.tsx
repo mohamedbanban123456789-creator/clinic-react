@@ -13,6 +13,7 @@ import { queueApi } from "@/clinic/api/queue"
 import { settingsApi } from "@/clinic/api/admin"
 import { apiErrorMessage, ApiError } from "@/clinic/api/client"
 import { AppButton, Icon, Modal, useToast } from "@/clinic/components/ui"
+import { ArabicDateField } from "@/clinic/components/DateField"
 import { arAgo, arNum, arTime, ageFromDob, moneyMinor, formatPhone } from "@/clinic/lib/format"
 import type { PatientDto, PatientSearchCandidateDto } from "@/clinic/api/types"
 
@@ -94,7 +95,7 @@ function NewPatientModal({
             <span>
               تاريخ الميلاد <b>*</b>
             </span>
-            <input type="date" value={form.dateOfBirth} onChange={set("dateOfBirth")} />
+            <ArabicDateField value={form.dateOfBirth} onChange={(iso) => setForm({ ...form, dateOfBirth: iso })} maxToday invalid={submitted && !form.dateOfBirth} />
             {submitted && !form.dateOfBirth && (
               <small className="field-error">تاريخ الميلاد مطلوب.</small>
             )}

@@ -220,7 +220,7 @@ export function apiErrorMessage(err: unknown): string {
     const map: Record<string, string> = {
       UNAUTHORIZED: "انتهت الجلسة أو البيانات غير صحيحة",
       FORBIDDEN: "لا تملك صلاحية تنفيذ هذا الإجراء",
-      NO_OPEN_SHIFT: "لا توجد وردية مفتوحة — افتح الوردية أولًا من شاشة الإغلاق اليومي",
+      NO_OPEN_SHIFT: "تعذّر إتمام العملية — أعد المحاولة بعد لحظات",
       SHIFT_ALREADY_OPEN: "توجد وردية مفتوحة بالفعل",
       ALREADY_ACTIVE: "المريض مسجل بالفعل في طابور اليوم",
       STALE_QUEUE: "تغير ترتيب الطابور منذ قليل — سيتم التحديث، حاول مرة أخرى",
