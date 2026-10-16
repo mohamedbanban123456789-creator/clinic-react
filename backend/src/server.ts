@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createApp } from './app.js';
 import { prisma } from './common/prisma.js';
+import { verifyDatabaseEncoding } from './common/db-encoding.js';
 import { purgeExpiredScribeAudio } from './modules/ai-scribe/scribe.service.js';
 import { setLogLevel, logger } from './common/utils/logger.js';
 import { loadEnv } from './config/env.js';
@@ -13,6 +14,9 @@ const AUDIO_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 async function boot(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.LOG_LEVEL);
+  // P0-2: fail loudly on non-UTF8 clusters (Arabic would corrupt to ?????)
+  // before any write happens. Never blocks boot on probe failure.
+  await verifyDatabaseEncoding();
   // BE-104: idempotent primary-doctor bootstrap before accepting traffic.
   await ensureSeededDoctor();
   // Startup ClinicSettings seed from env defaults (never overwrites an existing row).
