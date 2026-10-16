@@ -373,13 +373,23 @@ export interface AddendumDto {
   createdAt: string
 }
 
+export interface StructuredDiagnosisDto {
+  name: string
+  code?: string
+  type?: "PRIMARY" | "SECONDARY" | "DIFFERENTIAL"
+  notes?: string
+}
+
+export type DiagnosisEntryDto = string | StructuredDiagnosisDto
+
 export interface ChartEncounterDto {
   encounterId: string
   source: "MANUAL" | "SCRIBE"
   visitDate: string | null
   encounterType: string | null
   signedAt: string | null
-  diagnoses: string[]
+  diagnoses: DiagnosisEntryDto[]
+  diagnosisNotes?: string | null
   soap: SoapDto
   mse: MseDto
   finalContentHash: string | null

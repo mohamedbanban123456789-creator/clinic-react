@@ -3,10 +3,12 @@
 import { apiRequest } from "./client"
 import type {
   ChartEncounterDto,
+  DiagnosisEntryDto,
   EncounterDto,
   MedicationDto,
   MseDto,
   SoapDto,
+  StructuredDiagnosisDto,
 } from "./types"
 
 export interface CreateEncounterInput {
@@ -16,7 +18,8 @@ export interface CreateEncounterInput {
   queueEntryId?: string
   soap?: Partial<SoapDto>
   mse: MseDto
-  diagnoses?: string[]
+  diagnoses?: DiagnosisEntryDto[]
+  diagnosisNotes?: string | null
 }
 
 export interface PatchEncounterInput {
@@ -24,7 +27,13 @@ export interface PatchEncounterInput {
   encounterType?: string
   soap?: Partial<SoapDto>
   mse?: Partial<MseDto>
-  diagnoses?: string[]
+  diagnoses?: DiagnosisEntryDto[]
+  diagnosisNotes?: string | null
+}
+
+export interface AiDiagnosisResultDto {
+  diagnoses: StructuredDiagnosisDto[]
+  clinicalSummary: string
 }
 
 export interface MedicationInput {
@@ -63,6 +72,12 @@ export const ehrApi = {
       method: "PATCH",
       body: input,
       ifMatch: rowVersion,
+    })
+  },
+
+  runAiDiagnosis(id: string): Promise<AiDiagnosisResultDto> {
+    return apiRequest(`/ehr/encounters/${id}/ai-diagnosis`, {
+      method: "POST",
     })
   },
 

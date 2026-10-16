@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ehrApi } from "@/api/ehr"
+import { ehrApi, type AiDiagnosisResultDto } from "@/api/ehr"
 import { patientsApi } from "@/api/patients"
 import { supervisionApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
@@ -19,6 +19,25 @@ import { AppButton, Icon, Modal, useToast, SkeletonBlock } from "@/components/ui
 import { arDate, arNum, arAgo } from "@/lib/format"
 import { useAuth } from "@/auth/AuthContext"
 import { addendumReasonOptions } from "@/lib/constants"
+import type { StructuredDiagnosisDto } from "@/api/types"
+
+const normalizeDiagnoses = (raw: unknown[]): StructuredDiagnosisDto[] => {
+  return raw.map((item) => {
+    if (typeof item === "string") {
+      return { name: item, type: "PRIMARY" }
+    }
+    if (item && typeof item === "object" && "name" in item) {
+      return item as StructuredDiagnosisDto
+    }
+    return { name: String(item), type: "PRIMARY" }
+  })
+}
+
+const diagnosisTypeLabel: Record<string, string> = {
+  PRIMARY: "رئيسي",
+  SECONDARY: "ثانوي",
+  DIFFERENTIAL: "تفريقي",
+}
 
 const sectionTitles: Record<string, string> = {
   S: "Subjective — الشكوى والتجربة الذاتية",
@@ -43,6 +62,20 @@ export default function SoapScreen() {
     A: string
     P: string
   } | null>(null)
+  const [draftDiagnoses, setDraftDiagnoses] = useState<StructuredDiagnosisDto[] | null>(null)
+  const [draftDiagnosisNotes, setDraftDiagnosisNotes] = useState<string | null>(null)
+
+  // New diagnosis row form state
+  const [newDxName, setNewDxName] = useState("")
+  const [newDxCode, setNewDxCode] = useState("")
+  const [newDxType, setNewDxType] = useState<"PRIMARY" | "SECONDARY" | "DIFFERENTIAL">("PRIMARY")
+  const [newDxNotes, setNewDxNotes] = useState("")
+
+  // AI Diagnosis modal state
+  const [showAiModal, setShowAiModal] = useState(false)
+  const [aiSuggestions, setAiSuggestions] = useState<AiDiagnosisResultDto | null>(null)
+  const [selectedAiIndices, setSelectedAiIndices] = useState<number[]>([])
+
   const [reviewChecks, setReviewChecks] = useState({ S: false, O: false, A: false, P: false })
   const [showAddendum, setShowAddendum] = useState(false)
   const [addendumText, setAddendumText] = useState("")
@@ -81,19 +114,92 @@ export default function SoapScreen() {
   const isDraft = encounter?.status === "DRAFT"
   const isSigned = encounter?.status === "SIGNED"
 
+  const startEditing = () => {
+    setDraftSoap({
+      S: encounter?.soap?.S ?? "",
+      O: encounter?.soap?.O ?? "",
+      A: encounter?.soap?.A ?? "",
+      P: encounter?.soap?.P ?? "",
+    })
+    setDraftDiagnoses(normalizeDiagnoses(encounter?.diagnoses ?? []))
+    setDraftDiagnosisNotes(encounter?.diagnosisNotes ?? "")
+    setEditing(true)
+  }
+
+  const cancelEditing = () => {
+    setEditing(false)
+    setDraftSoap(null)
+    setDraftDiagnoses(null)
+    setDraftDiagnosisNotes(null)
+    setNewDxName("")
+    setNewDxCode("")
+    setNewDxType("PRIMARY")
+    setNewDxNotes("")
+  }
+
   const saveMutation = useMutation({
     mutationFn: () =>
       ehrApi.patchEncounter(encounter!.encounterId, encounter!.rowVersion, {
         soap: draftSoap ?? undefined,
+        diagnoses: draftDiagnoses ?? undefined,
+        diagnosisNotes: draftDiagnosisNotes !== null ? draftDiagnosisNotes : undefined,
       }),
     onSuccess: () => {
       notify(isSigned ? "تم حفظ التعديلات على التقرير" : "تم حفظ المسودة")
-      setEditing(false)
-      setDraftSoap(null)
+      cancelEditing()
       void queryClient.invalidateQueries({ queryKey: ["encounter"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
+
+  const aiDiagnosisMutation = useMutation({
+    mutationFn: () => ehrApi.runAiDiagnosis(encounter!.encounterId),
+    onSuccess: (data) => {
+      setAiSuggestions(data)
+      setSelectedAiIndices(data.diagnoses.map((_, i) => i))
+      setShowAiModal(true)
+      notify("تم توليد اقتراحات التشخيص بنجاح")
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const addDiagnosisItem = () => {
+    if (!newDxName.trim()) return
+    const newItem: StructuredDiagnosisDto = {
+      name: newDxName.trim(),
+      ...(newDxCode.trim() ? { code: newDxCode.trim() } : {}),
+      type: newDxType,
+      ...(newDxNotes.trim() ? { notes: newDxNotes.trim() } : {}),
+    }
+    setDraftDiagnoses((prev) => [...(prev ?? []), newItem])
+    setNewDxName("")
+    setNewDxCode("")
+    setNewDxType("PRIMARY")
+    setNewDxNotes("")
+  }
+
+  const removeDiagnosisItem = (index: number) => {
+    setDraftDiagnoses((prev) => (prev ? prev.filter((_, i) => i !== index) : []))
+  }
+
+  const applyAiSuggestions = () => {
+    if (!aiSuggestions) return
+    const chosen = aiSuggestions.diagnoses.filter((_, i) => selectedAiIndices.includes(i))
+    setDraftDiagnoses((prev) => {
+      const current = prev ?? normalizeDiagnoses(encounter?.diagnoses ?? [])
+      const names = new Set(current.map((d) => d.name))
+      const toAdd = chosen.filter((c) => !names.has(c.name))
+      return [...current, ...toAdd]
+    })
+    if (aiSuggestions.clinicalSummary) {
+      setDraftDiagnosisNotes((prev) => {
+        if (!prev || !prev.trim()) return aiSuggestions.clinicalSummary
+        return `${prev}\n\n[ملخص AI]: ${aiSuggestions.clinicalSummary}`
+      })
+    }
+    setShowAiModal(false)
+    notify("تم تطبيق الاقتراحات في المسودة")
+  }
 
   const signMutation = useMutation({
     mutationFn: () => ehrApi.sign(encounter!.encounterId, encounter!.rowVersion),
@@ -119,8 +225,7 @@ export default function SoapScreen() {
 
   const openEncounter = (id: string) => {
     setParams({ encounter: id })
-    setEditing(false)
-    setDraftSoap(null)
+    cancelEditing()
   }
 
   const soapForDisplay =
@@ -268,21 +373,22 @@ export default function SoapScreen() {
               <AppButton
                 variant="outline"
                 onClick={() => {
-                  if (editing) {
-                    setEditing(false)
-                    setDraftSoap(null)
-                  } else {
-                    setDraftSoap({
-                      S: encounter.soap?.S ?? "",
-                      O: encounter.soap?.O ?? "",
-                      A: encounter.soap?.A ?? "",
-                      P: encounter.soap?.P ?? "",
-                    })
-                    setEditing(true)
-                  }
+                  if (editing) cancelEditing()
+                  else startEditing()
                 }}
               >
                 {editing ? "إلغاء التعديل" : "تعديل التقرير"}
+              </AppButton>
+              <AppButton
+                variant="outline"
+                icon="sparkle"
+                onClick={() => {
+                  if (!editing) startEditing()
+                  aiDiagnosisMutation.mutate()
+                }}
+                disabled={aiDiagnosisMutation.isPending}
+              >
+                {aiDiagnosisMutation.isPending ? "جارٍ التحليل..." : "تشخيص ذكي (AI)"}
               </AppButton>
               <AppButton
                 variant="secondary"
@@ -312,21 +418,22 @@ export default function SoapScreen() {
               <AppButton
                 variant="outline"
                 onClick={() => {
-                  if (editing) {
-                    setEditing(false)
-                    setDraftSoap(null)
-                  } else {
-                    setDraftSoap({
-                      S: encounter.soap?.S ?? "",
-                      O: encounter.soap?.O ?? "",
-                      A: encounter.soap?.A ?? "",
-                      P: encounter.soap?.P ?? "",
-                    })
-                    setEditing(true)
-                  }
+                  if (editing) cancelEditing()
+                  else startEditing()
                 }}
               >
                 {editing ? "إلغاء التعديل" : "تعديل التقرير"}
+              </AppButton>
+              <AppButton
+                variant="outline"
+                icon="sparkle"
+                onClick={() => {
+                  if (!editing) startEditing()
+                  aiDiagnosisMutation.mutate()
+                }}
+                disabled={aiDiagnosisMutation.isPending}
+              >
+                {aiDiagnosisMutation.isPending ? "جارٍ التحليل..." : "تشخيص ذكي (AI)"}
               </AppButton>
               {editing && (
                 <AppButton
@@ -395,17 +502,232 @@ export default function SoapScreen() {
             </div>
           </article>
 
-          {encounter.diagnoses.length > 0 && (
-            <article className="soap-section">
-              <div className="soap-letter">Dx</div>
-              <div>
-                <h3>التشخيصات المسجلة</h3>
-                {encounter.diagnoses.map((d) => (
-                  <p key={d}>• {d}</p>
-                ))}
+          <article className="soap-section">
+            <div className="soap-letter">Dx</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>التشخيصات والملاحظات السريرية</h3>
+                  <small style={{ color: "var(--muted)" }}>التشخيص النهائي والترميز (ICD-10) ومبررات القرار الطبي</small>
+                </div>
+                {editing && (
+                  <AppButton
+                    variant="outline"
+                    icon="sparkle"
+                    type="button"
+                    onClick={() => aiDiagnosisMutation.mutate()}
+                    disabled={aiDiagnosisMutation.isPending}
+                  >
+                    {aiDiagnosisMutation.isPending ? "جارٍ التحليل الذكي..." : "اقتراح بالذكاء الاصطناعي (AI)"}
+                  </AppButton>
+                )}
               </div>
-            </article>
-          )}
+
+              {!editing ? (
+                <div>
+                  {normalizeDiagnoses(encounter.diagnoses ?? []).length === 0 && !encounter.diagnosisNotes ? (
+                    <p style={{ color: "var(--muted)", fontStyle: "italic", margin: "6px 0" }}>
+                      لم يتم تسجيل تشخيصات بعد — اضغط "تعديل التقرير" لتسجيل التشخيص السريري أو تشغيل التحليل الذكي.
+                    </p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+                      {normalizeDiagnoses(encounter.diagnoses ?? []).map((dx, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: "8px",
+                            background: "#f8fafc",
+                            border: "1px solid var(--border)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "2px 7px",
+                              borderRadius: "4px",
+                              background: dx.type === "PRIMARY" ? "#e0e7ff" : dx.type === "SECONDARY" ? "#f3f4f6" : "#ffedd5",
+                              color: dx.type === "PRIMARY" ? "#3730a3" : dx.type === "SECONDARY" ? "#4b5563" : "#9a3412",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {diagnosisTypeLabel[dx.type ?? "PRIMARY"] ?? dx.type}
+                          </span>
+                          {dx.code && (
+                            <span style={{ fontSize: "11px", background: "#e2e8f0", padding: "1px 6px", borderRadius: "4px", fontWeight: "600" }}>
+                              {dx.code}
+                            </span>
+                          )}
+                          <strong style={{ fontSize: "12px" }}>{dx.name}</strong>
+                          {dx.notes && (
+                            <span style={{ fontSize: "11px", color: "var(--muted)", marginRight: "auto" }}>
+                              {dx.notes}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      {encounter.diagnosisNotes && (
+                        <div style={{ marginTop: "6px", padding: "10px", borderRadius: "8px", background: "#fdfefe", border: "1px solid #e2e8f0" }}>
+                          <strong style={{ fontSize: "11px", color: "var(--primary)" }}>ملخص ومبررات التشخيص السريري:</strong>
+                          <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--text)", whiteSpace: "pre-wrap" }}>
+                            {encounter.diagnosisNotes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "8px" }}>
+                  {/* Current draft diagnoses list */}
+                  {(draftDiagnoses ?? []).length === 0 ? (
+                    <p style={{ color: "var(--muted)", fontStyle: "italic", fontSize: "11px", margin: 0 }}>
+                      لا توجد تشخيصات مضافة حالياً. يمكنك إضافة تشخيص أدناه أو استخدام الاقتراح الذكي.
+                    </p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {(draftDiagnoses ?? []).map((dx, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: "8px",
+                            background: "#ffffff",
+                            border: "1px solid var(--border)",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              background: dx.type === "PRIMARY" ? "#e0e7ff" : dx.type === "SECONDARY" ? "#f3f4f6" : "#ffedd5",
+                              color: dx.type === "PRIMARY" ? "#3730a3" : dx.type === "SECONDARY" ? "#4b5563" : "#9a3412",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {diagnosisTypeLabel[dx.type ?? "PRIMARY"] ?? dx.type}
+                          </span>
+                          {dx.code && (
+                            <span style={{ fontSize: "11px", background: "#e2e8f0", padding: "1px 6px", borderRadius: "4px" }}>
+                              {dx.code}
+                            </span>
+                          )}
+                          <strong style={{ fontSize: "12px" }}>{dx.name}</strong>
+                          {dx.notes && (
+                            <small style={{ color: "var(--muted)", marginRight: "auto" }}>{dx.notes}</small>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeDiagnosisItem(i)}
+                            style={{
+                              border: 0,
+                              background: "transparent",
+                              color: "#ef4444",
+                              cursor: "pointer",
+                              fontSize: "16px",
+                              fontWeight: "bold",
+                              marginRight: dx.notes ? undefined : "auto",
+                              padding: "0 6px",
+                            }}
+                            title="حذف هذا التشخيص"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add diagnosis form */}
+                  <div style={{ padding: "10px", background: "#f8fafc", borderRadius: "8px", border: "1px dashed var(--border)" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr auto", gap: "8px", alignItems: "end" }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: "600", display: "block", marginBottom: "3px" }}>
+                          اسم التشخيص <b style={{ color: "red" }}>*</b>
+                        </span>
+                        <input
+                          value={newDxName}
+                          onChange={(e) => setNewDxName(e.target.value)}
+                          placeholder="مثال: اضطراب اكتئابي جسيم"
+                          style={{ width: "100%", height: "36px", borderRadius: "6px", border: "1px solid var(--border)", padding: "0 8px", fontSize: "12px" }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault()
+                              addDiagnosisItem()
+                            }
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: "600", display: "block", marginBottom: "3px" }}>
+                          الرمز (ICD-10)
+                        </span>
+                        <input
+                          value={newDxCode}
+                          onChange={(e) => setNewDxCode(e.target.value)}
+                          placeholder="مثال: F32.1"
+                          style={{ width: "100%", height: "36px", borderRadius: "6px", border: "1px solid var(--border)", padding: "0 8px", fontSize: "12px" }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: "600", display: "block", marginBottom: "3px" }}>
+                          نوع التشخيص
+                        </span>
+                        <select
+                          value={newDxType}
+                          onChange={(e) => setNewDxType(e.target.value as any)}
+                          style={{ width: "100%", height: "36px", borderRadius: "6px", border: "1px solid var(--border)", padding: "0 8px", fontSize: "12px", background: "white" }}
+                        >
+                          <option value="PRIMARY">رئيسي (PRIMARY)</option>
+                          <option value="SECONDARY">ثانوي (SECONDARY)</option>
+                          <option value="DIFFERENTIAL">تفريقي (DIFFERENTIAL)</option>
+                        </select>
+                      </div>
+                      <AppButton
+                        type="button"
+                        variant="primary"
+                        onClick={addDiagnosisItem}
+                        disabled={!newDxName.trim()}
+                      >
+                        إضافة
+                      </AppButton>
+                    </div>
+                    <div style={{ marginTop: "6px" }}>
+                      <input
+                        value={newDxNotes}
+                        onChange={(e) => setNewDxNotes(e.target.value)}
+                        placeholder="ملاحظات ومبررات حول هذا التشخيص (اختياري)..."
+                        style={{ width: "100%", height: "32px", borderRadius: "6px", border: "1px solid var(--border)", padding: "0 8px", fontSize: "11px" }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Free text diagnosis notes */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "11px", fontWeight: "700", marginBottom: "3px" }}>
+                      ملخص ومبررات التشخيص السريري (نص حر):
+                    </label>
+                    <textarea
+                      value={draftDiagnosisNotes ?? ""}
+                      onChange={(e) => setDraftDiagnosisNotes(e.target.value)}
+                      rows={3}
+                      placeholder="سجل مبررات التشخيص، تطور الأعراض، أو أي ملاحظات تشخيصية حرة..."
+                      style={{ width: "100%", borderRadius: "8px", border: "1px solid var(--border)", padding: "8px", fontSize: "12px", resize: "vertical" }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </article>
 
           {encounter.addenda.length > 0 && (
             <article className="soap-section">
@@ -503,6 +825,83 @@ export default function SoapScreen() {
               </AppButton>
             </div>
           </form>
+        </Modal>
+      )}
+      {showAiModal && aiSuggestions && (
+        <Modal
+          title="اقتراحات التشخيص بالذكاء الاصطناعي"
+          subtitle="تم تحليل محتوى الجلسة السريرية واستخلاص التشخيصات المقترحة التالية. حدد ما ترغب بإضافته إلى مسودة التقرير."
+          onClose={() => setShowAiModal(false)}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "400px", overflowY: "auto" }}>
+            {aiSuggestions.diagnoses.map((dx, idx) => (
+              <label
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  padding: "10px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border)",
+                  background: selectedAiIndices.includes(idx) ? "#f0f4ff" : "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedAiIndices.includes(idx)}
+                  onChange={(e) => {
+                    if (e.target.checked) setSelectedAiIndices([...selectedAiIndices, idx])
+                    else setSelectedAiIndices(selectedAiIndices.filter((i) => i !== idx))
+                  }}
+                  style={{ marginTop: "4px" }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                    <strong style={{ fontSize: "13px" }}>{dx.name}</strong>
+                    {dx.code && (
+                      <span style={{ fontSize: "10px", background: "#e2e8f0", padding: "1px 6px", borderRadius: "4px", fontWeight: "bold" }}>
+                        {dx.code}
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        padding: "1px 6px",
+                        borderRadius: "4px",
+                        background: dx.type === "PRIMARY" ? "#e0e7ff" : dx.type === "SECONDARY" ? "#f3f4f6" : "#ffedd5",
+                        color: dx.type === "PRIMARY" ? "#3730a3" : dx.type === "SECONDARY" ? "#4b5563" : "#9a3412",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {diagnosisTypeLabel[dx.type ?? "PRIMARY"] ?? dx.type}
+                    </span>
+                  </div>
+                  {dx.notes && <p style={{ margin: "4px 0 0", fontSize: "11px", color: "var(--muted)" }}>{dx.notes}</p>}
+                </div>
+              </label>
+            ))}
+            {aiSuggestions.clinicalSummary && (
+              <div style={{ padding: "10px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <strong style={{ fontSize: "12px", display: "block", marginBottom: "4px", color: "var(--primary)" }}>ملخص التحليل السريري:</strong>
+                <p style={{ margin: 0, fontSize: "12px", color: "#334155" }}>{aiSuggestions.clinicalSummary}</p>
+              </div>
+            )}
+          </div>
+          <div className="modal-actions" style={{ marginTop: "16px" }}>
+            <AppButton variant="outline" type="button" onClick={() => setShowAiModal(false)}>
+              تخطي وإلغاء
+            </AppButton>
+            <AppButton
+              variant="primary"
+              type="button"
+              onClick={applyAiSuggestions}
+              disabled={selectedAiIndices.length === 0 && !aiSuggestions.clinicalSummary}
+            >
+              تطبيق الاقتراحات المحددة ({arNum(selectedAiIndices.length)})
+            </AppButton>
+          </div>
         </Modal>
       )}
     </>

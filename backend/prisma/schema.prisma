@@ -181,6 +181,7 @@ enum AuditAction {
   ENCOUNTER_SIGN
   ENCOUNTER_DISCARD
   ENCOUNTER_ADDENDUM
+  ENCOUNTER_AI_DIAGNOSIS
   CHART_READ
   MEDICATION_CREATE
   MEDICATION_DISCONTINUE
@@ -564,6 +565,7 @@ model Encounter {
   mseSpeechCoherence   String          @default("NOT_PERFORMED") @map("mse_speech_coherence")
   mseMoodAffect        String          @default("NOT_PERFORMED") @map("mse_mood_affect")
   diagnoses            Json            @default("[]")
+  diagnosisNotes       String?         @map("diagnosis_notes")
   status               EncounterStatus @default(DRAFT)
   // BE-501 OCC: rowVersion starts at 1, increments on every PATCH/sign.
   rowVersion           Int             @default(1) @map("row_version")
