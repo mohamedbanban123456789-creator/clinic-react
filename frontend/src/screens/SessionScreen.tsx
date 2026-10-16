@@ -101,6 +101,12 @@ export default function SessionScreen() {
   })
   const [privateNote, setPrivateNote] = useState("")
   const [showManual, setShowManual] = useState(false)
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelReason, setCancelReason] = useState("")
+  const [showStopModal, setShowStopModal] = useState(false)
+  const [stopReason, setStopReason] = useState("")
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteReason, setDeleteReason] = useState("")
   const [aiError, setAiError] = useState<string | null>(null)
   const [cycle2, setCycle2] = useState<{
     soap: { S: string; O: string; A: string; P: string }
@@ -307,6 +313,55 @@ export default function SessionScreen() {
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
 
+  const cancelMutation = useMutation({
+    mutationFn: () => {
+      if (!sessionId) throw new Error("لا توجد جلسة نشطة لإلغائها")
+      return scribeApi.cancelSession(sessionId, cancelReason.trim() || undefined)
+    },
+    onSuccess: () => {
+      notify("تم إلغاء الجلسة وإتلاف الصوت المسجل")
+      setShowCancelModal(false)
+      setCancelReason("")
+      setState("idle")
+      setSessionId(null)
+      setCycle2(null)
+      setAnalysis(null)
+      setElapsed(0)
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const stopMutation = useMutation({
+    mutationFn: () => {
+      if (!sessionId) throw new Error("لا توجد جلسة نشطة لإيقافها")
+      return scribeApi.stopSession(sessionId, stopReason.trim() || undefined)
+    },
+    onSuccess: () => {
+      notify("تم تسجيل إيقاف الجلسة")
+      setShowStopModal(false)
+      setStopReason("")
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => {
+      if (!sessionId) throw new Error("لا توجد جلسة نشطة لحذفها")
+      return scribeApi.deleteSession(sessionId, deleteReason.trim() || undefined)
+    },
+    onSuccess: () => {
+      notify("تم حذف الجلسة ومسوداتها نهائيًا")
+      setShowDeleteModal(false)
+      setDeleteReason("")
+      setState("idle")
+      setSessionId(null)
+      setCycle2(null)
+      setAnalysis(null)
+      setElapsed(0)
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
   /* ------------------------- Manual EHR fallback ------------------------- */
 
   const manualMutation = useMutation({
@@ -463,14 +518,24 @@ export default function SessionScreen() {
               </>
             )}
             {(state === "recording" || state === "paused") && (
-              <>
-                <button className="round-control pause" onClick={togglePause}>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <button className="round-control pause" onClick={togglePause} title={state === "paused" ? "استئناف التسجيل" : "إيقاف مؤقت"}>
                   <Icon name={state === "paused" ? "mic" : "pause"} />
                 </button>
-                <button className="round-control stop" onClick={stopRecording}>
+                <button className="round-control stop" onClick={stopRecording} title="إنهاء التسجيل ومعالجة المسودة">
                   <Icon name="stop" />
                 </button>
-              </>
+                {sessionId && (
+                  <>
+                    <AppButton variant="outline" onClick={() => setShowStopModal(true)}>
+                      إيقاف الجلسة
+                    </AppButton>
+                    <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
+                      إلغاء الجلسة
+                    </AppButton>
+                  </>
+                )}
+              </div>
             )}
             {state === "processing" && (
               <span className="processing-pill">
@@ -478,19 +543,41 @@ export default function SessionScreen() {
               </span>
             )}
             {state === "ready" && (
-              <AppButton icon="sparkle" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending}>
-                {commitMutation.isPending ? "جارٍ الاعتماد..." : "اعتماد مسودة SOAP"}
-              </AppButton>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <AppButton icon="sparkle" onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending}>
+                  {commitMutation.isPending ? "جارٍ الاعتماد..." : "اعتماد مسودة SOAP"}
+                </AppButton>
+                {sessionId && (
+                  <>
+                    <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
+                      إلغاء الجلسة
+                    </AppButton>
+                    <AppButton variant="outline" onClick={() => setShowDeleteModal(true)}>
+                      حذف الجلسة
+                    </AppButton>
+                  </>
+                )}
+              </div>
             )}
             {state === "error" && (
-              <>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
                 <AppButton icon="mic" variant="outline" onClick={() => void startRecording()}>
                   إعادة التسجيل
                 </AppButton>
                 <AppButton icon="file" onClick={() => setShowManual(true)}>
                   توثيق يدوي بدون AI
                 </AppButton>
-              </>
+                {sessionId && (
+                  <>
+                    <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
+                      إلغاء الجلسة
+                    </AppButton>
+                    <AppButton variant="outline" onClick={() => setShowDeleteModal(true)}>
+                      حذف الجلسة
+                    </AppButton>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </section>
@@ -724,6 +811,136 @@ export default function SessionScreen() {
           </div>
         </Modal>
       )}
+
+      {showCancelModal && (
+        <Modal
+          title="إلغاء جلسة التوثيق"
+          subtitle="إلغاء المسودة الحالية وإتلاف التسجيل الصوتي المرتبط بها."
+          onClose={() => setShowCancelModal(false)}
+        >
+          <div className="confirm-visual">
+            <span>
+              <Icon name="alert" size={28} />
+            </span>
+            <h3>هل أنت متأكد من إلغاء الجلسة؟</h3>
+            <p>
+              سيتم التراجع عن هذه الجلسة وإتلاف الملفات الصوتية فورًا مع توثيق الإلغاء في سجل التدقيق.
+            </p>
+            <div style={{ marginTop: "12px", textAlign: "right" }}>
+              <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>
+                سبب الإلغاء (اختياري):
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="مثال: رغبة المريض، تسجيل خاطئ..."
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #ccc" }}
+              />
+            </div>
+          </div>
+          <div className="modal-actions">
+            <AppButton variant="outline" onClick={() => setShowCancelModal(false)}>
+              تراجع
+            </AppButton>
+            <AppButton
+              variant="outline"
+              onClick={() => cancelMutation.mutate()}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending ? "جارٍ الإلغاء..." : "تأكيد إلغاء الجلسة"}
+            </AppButton>
+          </div>
+        </Modal>
+      )}
+
+      {showStopModal && (
+        <Modal
+          title="إيقاف جلسة التوثيق"
+          subtitle="تسجيل إيقاف الجلسة في سجل التدقيق."
+          onClose={() => setShowStopModal(false)}
+        >
+          <div className="confirm-visual">
+            <span>
+              <Icon name="stop" size={28} />
+            </span>
+            <h3>هل تريد إيقاف الجلسة الحالية؟</h3>
+            <p>
+              سيتم تسجيل وقت الإيقاف للجلسة الحالية وحفظ حالتها في سجل التدقيق.
+            </p>
+            <div style={{ marginTop: "12px", textAlign: "right" }}>
+              <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>
+                سبب الإيقاف (اختياري):
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="مثال: انتهاء وقت المقابلة..."
+                value={stopReason}
+                onChange={(e) => setStopReason(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #ccc" }}
+              />
+            </div>
+          </div>
+          <div className="modal-actions">
+            <AppButton variant="outline" onClick={() => setShowStopModal(false)}>
+              متابعة
+            </AppButton>
+            <AppButton
+              variant="secondary"
+              onClick={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+            >
+              {stopMutation.isPending ? "جارٍ الإيقاف..." : "تأكيد الإيقاف"}
+            </AppButton>
+          </div>
+        </Modal>
+      )}
+
+      {showDeleteModal && (
+        <Modal
+          title="حذف جلسة التوثيق نهائيًا"
+          subtitle="حذف الجلسة ومسودات SOAP المرتبطة بها بشكل نهائي."
+          onClose={() => setShowDeleteModal(false)}
+        >
+          <div className="confirm-visual">
+            <span>
+              <Icon name="alert" size={28} />
+            </span>
+            <h3>هل أنت متأكد من حذف الجلسة ومسوداتها؟</h3>
+            <p style={{ color: "var(--color-danger, #b42336)" }}>
+              تحذير: سيتم حذف جميع مسودات SOAP المرتبطة بهذه الجلسة وإتلاف الصوت المسجل نهائيًا. لا يمكن التراجع عن هذا الإجراء.
+            </p>
+            <div style={{ marginTop: "12px", textAlign: "right" }}>
+              <label style={{ display: "block", marginBottom: "6px", fontSize: "14px", fontWeight: "bold" }}>
+                سبب الحذف (اختياري):
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="مثال: جلسة تجريبية، بيانات غير صحيحة..."
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid #ccc" }}
+              />
+            </div>
+          </div>
+          <div className="modal-actions">
+            <AppButton variant="outline" onClick={() => setShowDeleteModal(false)}>
+              إلغاء
+            </AppButton>
+            <AppButton
+              variant="danger"
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "جارٍ الحذف..." : "تأكيد الحذف النهائي"}
+            </AppButton>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
+

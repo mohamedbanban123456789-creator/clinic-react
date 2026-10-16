@@ -87,4 +87,47 @@ export const scribeApi = {
       body: reason ? { reason } : {},
     })
   },
+
+  cancelSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{
+    sessionId: string
+    status: string
+    cancelled: boolean
+    audioPurged: boolean
+  }> {
+    return apiRequest(`/scribe/sessions/${sessionId}/cancel`, {
+      method: "POST",
+      body: reason ? { reason } : {},
+    })
+  },
+
+  stopSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{
+    sessionId: string
+    status: string
+    stoppedAt: string
+  }> {
+    return apiRequest(`/scribe/sessions/${sessionId}/stop`, {
+      method: "POST",
+      body: reason ? { reason } : {},
+    })
+  },
+
+  deleteSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{
+    sessionId: string
+    deleted: boolean
+  }> {
+    return apiRequest(`/scribe/sessions/${sessionId}`, {
+      method: "DELETE",
+      body: reason ? { reason } : {},
+    })
+  },
 }
+

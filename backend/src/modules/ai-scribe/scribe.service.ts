@@ -29,8 +29,11 @@ import { CYCLE_1_ANALYSIS_PROMPT, CYCLE_2_SYNTHESIS_PROMPT } from './prompts/scr
 import { purgeScribeAudio, saveScribeAudio } from './audio.store.js';
 import type {
   AudioUploadInput,
+  CancelSessionInput,
   CommitSessionInput,
   CreateSessionInput,
+  DeleteSessionInput,
+  StopSessionInput,
   WithdrawConsentInput,
 } from './scribe.validators.js';
 
@@ -846,6 +849,163 @@ export async function withdrawConsentScribeSession(
     withdrawnAt: updated.withdrawnAt === null ? null : updated.withdrawnAt.toISOString(),
     retentionUntil: updated.audioRetentionUntil === null ? null : updated.audioRetentionUntil.toISOString(),
     audioPurged: true as const,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /sessions/:id/cancel [DOCTOR] — cancel a pending/in-progress session.
+// Purges audio, updates status to WITHDRAWN, audits cancellation.
+// Committed sessions cannot be cancelled.
+// ---------------------------------------------------------------------------
+export async function cancelScribeSession(
+  sessionId: string,
+  input: CancelSessionInput = {},
+  actor: DoctorActor,
+  deps: ScribeTestDeps = {},
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  status: 'WITHDRAWN';
+  cancelled: true;
+  audioPurged: true;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const purgeFiles = deps.purgeAudioFiles ?? purgeScribeAudio;
+  await purgeFiles(sessionId);
+
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: {
+        status: 'WITHDRAWN',
+        consentStatus: 'WITHDRAWN',
+        withdrawnAt: new Date(),
+        withdrawalReason: input.reason ?? 'CANCELLED_BY_DOCTOR',
+        audioReference: null,
+      },
+    });
+    if (claimed.count === 0) {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CONSENT_WITHDRAWN',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'CANCELLED_BY_DOCTOR',
+      afterState: { status: 'WITHDRAWN', action: 'CANCEL', audioPurged: true },
+    });
+  });
+
+  return {
+    sessionId,
+    status: 'WITHDRAWN' as const,
+    cancelled: true as const,
+    audioPurged: true as const,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// POST /sessions/:id/stop [DOCTOR] — stop an active/recording scribe session.
+// Marks stoppedAt on the session row and audits the stop.
+// Committed sessions cannot be stopped.
+// ---------------------------------------------------------------------------
+export async function stopScribeSession(
+  sessionId: string,
+  input: StopSessionInput = {},
+  actor: DoctorActor,
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  status: ScribeSessionStatus;
+  stoppedAt: string;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const stoppedAt = new Date();
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { stoppedAt },
+    });
+    if (claimed.count === 0) {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CONSENT_WITHDRAWN',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'STOPPED_BY_DOCTOR',
+      afterState: { status: session.status, action: 'STOP', stoppedAt: stoppedAt.toISOString() },
+    });
+  });
+
+  return {
+    sessionId,
+    status: session.status,
+    stoppedAt: stoppedAt.toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /sessions/:id [DOCTOR] — delete an uncommitted scribe session + drafts.
+// Purges audio, removes session & draft rows, and audits deletion.
+// Committed sessions cannot be deleted.
+// ---------------------------------------------------------------------------
+export async function deleteScribeSession(
+  sessionId: string,
+  input: DeleteSessionInput = {},
+  actor: DoctorActor,
+  deps: ScribeTestDeps = {},
+  db: PrismaClient = prisma,
+): Promise<{
+  sessionId: string;
+  deleted: true;
+}> {
+  const session = await requireSessionRow(db, sessionId);
+  if (session.status === 'COMMITTED') {
+    throw new AppError('CONFLICT', 'Scribe session is already committed');
+  }
+
+  const purgeFiles = deps.purgeAudioFiles ?? purgeScribeAudio;
+  await purgeFiles(sessionId);
+
+  await db.$transaction(async (tx) => {
+    const fresh = await tx.scribeSession.findUniqueOrThrow({ where: { id: sessionId } });
+    if (fresh.status === 'COMMITTED') {
+      throw new AppError('CONFLICT', 'Scribe session is already committed');
+    }
+
+    await tx.scribeDraft.deleteMany({ where: { scribeSessionId: sessionId } });
+    await tx.scribeSession.delete({ where: { id: sessionId } });
+
+    await writeAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'ENCOUNTER_DISCARD',
+      entityType: 'ScribeSession',
+      entityId: sessionId,
+      requestId: randomUUID(),
+      reasonText: input.reason ?? 'DELETED_BY_DOCTOR',
+      afterState: { deleted: true, action: 'DELETE', priorStatus: session.status },
+    });
+  });
+
+  return {
+    sessionId,
+    deleted: true as const,
   };
 }
 
