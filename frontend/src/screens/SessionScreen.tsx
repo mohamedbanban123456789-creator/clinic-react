@@ -101,6 +101,7 @@ export default function SessionScreen() {
   })
   const [privateNote, setPrivateNote] = useState("")
   const [showManual, setShowManual] = useState(false)
+  const [showCancelRecordModal, setShowCancelRecordModal] = useState(false)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState("")
   const [showStopModal, setShowStopModal] = useState(false)
@@ -135,6 +136,7 @@ export default function SessionScreen() {
   const streamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<number | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const lastAudioPayload = useRef<{ audioBase64: string; mimeType: string } | null>(null)
 
   const patientQuery = useQuery({
     queryKey: ["patient", current?.patientId ?? patientParam ?? ""],
@@ -221,6 +223,7 @@ export default function SessionScreen() {
   }
 
   const processAudio = async (audioBase64: string, mimeType: string) => {
+    lastAudioPayload.current = { audioBase64, mimeType }
     setState("processing")
     setAiError(null)
     try {
@@ -261,6 +264,54 @@ export default function SessionScreen() {
         setState("error")
       }
     }
+  }
+
+  const handleRetryCycle = () => {
+    if (lastAudioPayload.current) {
+      void processAudio(lastAudioPayload.current.audioBase64, lastAudioPayload.current.mimeType)
+    } else {
+      void startRecording()
+    }
+  }
+
+  const handleResetRecorder = () => {
+    setState("idle")
+    setAiError(null)
+    setElapsed(0)
+    chunksRef.current = []
+    lastAudioPayload.current = null
+    notify("تمت إعادة ضبط المسجل")
+  }
+
+  const handleCancelRecording = async () => {
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    if (mediaRef.current && mediaRef.current.state !== "inactive") {
+      mediaRef.current.onstop = null
+      mediaRef.current.stop()
+    }
+    const sid = sessionId
+    chunksRef.current = []
+    lastAudioPayload.current = null
+    setElapsed(0)
+    setState("idle")
+    setSessionId(null)
+    setCycle2(null)
+    setAnalysis(null)
+    setAiError(null)
+    setShowCancelRecordModal(false)
+
+    if (sid) {
+      try {
+        await scribeApi.cancelSession(sid, "إلغاء التسجيل من الطبيب")
+      } catch {
+        // best effort audit
+      }
+    }
+    notify("تم إلغاء التسجيل والتراجع عن الجلسة")
   }
 
   const stopRecording = () => {
@@ -525,15 +576,13 @@ export default function SessionScreen() {
                 <button className="round-control stop" onClick={stopRecording} title="إنهاء التسجيل ومعالجة المسودة">
                   <Icon name="stop" />
                 </button>
+                <AppButton variant="outline" icon="alert" onClick={() => setShowCancelRecordModal(true)}>
+                  إلغاء التسجيل
+                </AppButton>
                 {sessionId && (
-                  <>
-                    <AppButton variant="outline" onClick={() => setShowStopModal(true)}>
-                      إيقاف الجلسة
-                    </AppButton>
-                    <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
-                      إلغاء الجلسة
-                    </AppButton>
-                  </>
+                  <AppButton variant="outline" onClick={() => setShowStopModal(true)}>
+                    إيقاف الجلسة
+                  </AppButton>
                 )}
               </div>
             )}
@@ -552,7 +601,7 @@ export default function SessionScreen() {
                     <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
                       إلغاء الجلسة
                     </AppButton>
-                    <AppButton variant="outline" onClick={() => setShowDeleteModal(true)}>
+                    <AppButton variant="danger" onClick={() => setShowDeleteModal(true)}>
                       حذف الجلسة
                     </AppButton>
                   </>
@@ -561,10 +610,13 @@ export default function SessionScreen() {
             )}
             {state === "error" && (
               <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-                <AppButton icon="mic" variant="outline" onClick={() => void startRecording()}>
-                  إعادة التسجيل
+                <AppButton icon="sparkle" onClick={handleRetryCycle}>
+                  إعادة المحاولة
                 </AppButton>
-                <AppButton icon="file" onClick={() => setShowManual(true)}>
+                <AppButton variant="outline" onClick={handleResetRecorder}>
+                  إعادة الضبط
+                </AppButton>
+                <AppButton icon="file" variant="outline" onClick={() => setShowManual(true)}>
                   توثيق يدوي بدون AI
                 </AppButton>
                 {sessionId && (
@@ -572,7 +624,7 @@ export default function SessionScreen() {
                     <AppButton variant="outline" onClick={() => setShowCancelModal(true)}>
                       إلغاء الجلسة
                     </AppButton>
-                    <AppButton variant="outline" onClick={() => setShowDeleteModal(true)}>
+                    <AppButton variant="danger" onClick={() => setShowDeleteModal(true)}>
                       حذف الجلسة
                     </AppButton>
                   </>
@@ -807,6 +859,35 @@ export default function SessionScreen() {
               disabled={manualMutation.isPending}
             >
               {manualMutation.isPending ? "جارٍ الإنشاء..." : "إنشاء المسودة"}
+            </AppButton>
+          </div>
+        </Modal>
+      )}
+
+      {showCancelRecordModal && (
+        <Modal
+          title="إلغاء التسجيل الجاري"
+          subtitle="إيقاف الميكروفون وإتلاف الصوت المسجل والتراجع عن الجلسة."
+          onClose={() => setShowCancelRecordModal(false)}
+        >
+          <div className="confirm-visual">
+            <span>
+              <Icon name="alert" size={28} />
+            </span>
+            <h3>هل أنت متأكد من إلغاء التسجيل الجاري؟</h3>
+            <p style={{ color: "var(--color-danger, #b42336)" }}>
+              سيتم إيقاف الميكروفون فورًا وإتلاف التسجيل الصوتي الجاري والتراجع عن جلسة المساعد الصوتي وتوثيق ذلك في سجل التدقيق.
+            </p>
+          </div>
+          <div className="modal-actions">
+            <AppButton variant="outline" onClick={() => setShowCancelRecordModal(false)}>
+              متابعة التسجيل
+            </AppButton>
+            <AppButton
+              variant="danger"
+              onClick={() => void handleCancelRecording()}
+            >
+              تأكيد إلغاء التسجيل
             </AppButton>
           </div>
         </Modal>

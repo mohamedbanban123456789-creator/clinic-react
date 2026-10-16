@@ -326,45 +326,53 @@ export async function runCycle1Consultation(
 
   let analysis: Cycle1Analysis;
   let transcript: StoredTranscript | null = prior.transcript;
-  if (useGroqPipeline(deps)) {
-    // Groq 3-stage path: transcribe -> cleanup/diarize -> analyze cleaned.
-    const stages = deps.groqStages;
-    const audioInput = {
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-    };
-    const raw =
-      stages !== undefined
-        ? await stages.transcribe(audioInput)
-        : await transcribeAudio(audioInput);
-    const ctx = await cleanupContext(db, session);
-    const cleaned =
-      stages !== undefined
-        ? await stages.cleanup(raw, ctx)
-        : await cleanupTranscript(raw, ctx);
-    const rawJson =
-      stages !== undefined
-        ? await stages.analyze({ systemPrompt: CYCLE_1_ANALYSIS_PROMPT, cleanedText: cleaned.cleanedText })
-        : await analyzeCleanedTranscript({
-            systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
-            cleanedText: cleaned.cleanedText,
-          });
-    analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
-    transcript = {
-      raw,
-      cleaned: cleaned.cleanedText,
-      segments: cleaned.segments,
-      cleanedAt: new Date().toISOString(),
-      model: resolveGroqConfig().chatModel,
-      audioHash: sha256Hex(input.audioBase64),
-    };
-  } else {
-    const generate = deps.generateContent;
-    analysis = await analyzeConsultationAudio({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      ...(generate !== undefined ? { generateContent: generate } : {}),
-    });
+  try {
+    if (useGroqPipeline(deps)) {
+      // Groq 3-stage path: transcribe -> cleanup/diarize -> analyze cleaned.
+      const stages = deps.groqStages;
+      const audioInput = {
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+      };
+      const raw =
+        stages !== undefined
+          ? await stages.transcribe(audioInput)
+          : await transcribeAudio(audioInput);
+      const ctx = await cleanupContext(db, session);
+      const cleaned =
+        stages !== undefined
+          ? await stages.cleanup(raw, ctx)
+          : await cleanupTranscript(raw, ctx);
+      const rawJson =
+        stages !== undefined
+          ? await stages.analyze({ systemPrompt: CYCLE_1_ANALYSIS_PROMPT, cleanedText: cleaned.cleanedText })
+          : await analyzeCleanedTranscript({
+              systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
+              cleanedText: cleaned.cleanedText,
+            });
+      analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
+      transcript = {
+        raw,
+        cleaned: cleaned.cleanedText,
+        segments: cleaned.segments,
+        cleanedAt: new Date().toISOString(),
+        model: resolveGroqConfig().chatModel,
+        audioHash: sha256Hex(input.audioBase64),
+      };
+    } else {
+      const generate = deps.generateContent;
+      analysis = await analyzeConsultationAudio({
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        ...(generate !== undefined ? { generateContent: generate } : {}),
+      });
+    }
+  } catch (err) {
+    await db.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { status: 'FAILED' },
+    }).catch(() => {});
+    throw err;
   }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;
@@ -434,63 +442,71 @@ export async function runCycle2DoctorDecision(
   const generateDecision = deps.generateContent;
   let synthesis: Cycle2Synthesis;
   let decisionTranscript: StoredTranscript | null = prior.decisionTranscript;
-  if (generateDecision !== undefined) {
-    synthesis = await synthesizeDoctorDecision({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      cycle1Context: prior.cycle1,
-      generateContent: generateDecision,
-    });
-  } else if (useGroqPipeline(deps)) {
-    // Groq 3-stage path. The UI sends ONE recording for both cycles: when
-    // the Cycle-2 bytes match Cycle-1 (audio hash), the cleaned transcript
-    // is reused with ZERO extra AI calls. A different audio (e.g. a fresh
-    // doctor dictation) runs the full transcribe+cleanup pipeline instead.
-    const stages = deps.groqStages;
-    const audioHash = sha256Hex(input.audioBase64);
-    let cleanedDecisionText: string;
-    if (prior.transcript !== null && prior.transcript.audioHash === audioHash) {
-      decisionTranscript = prior.transcript;
-      cleanedDecisionText = prior.transcript.cleaned;
-    } else {
-      const audioInput = {
+  try {
+    if (generateDecision !== undefined) {
+      synthesis = await synthesizeDoctorDecision({
         audioBase64: input.audioBase64,
         ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      };
-      const rawDecision =
-        stages !== undefined ? await stages.transcribe(audioInput) : await transcribeAudio(audioInput);
-      const ctx = await cleanupContext(db, session);
-      const cleanedDecision =
-        stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
-      decisionTranscript = {
-        raw: rawDecision,
-        cleaned: cleanedDecision.cleanedText,
-        segments: cleanedDecision.segments,
-        cleanedAt: new Date().toISOString(),
-        model: resolveGroqConfig().chatModel,
-        audioHash,
-      };
-      cleanedDecisionText = cleanedDecision.cleanedText;
+        cycle1Context: prior.cycle1,
+        generateContent: generateDecision,
+      });
+    } else if (useGroqPipeline(deps)) {
+      // Groq 3-stage path. The UI sends ONE recording for both cycles: when
+      // the Cycle-2 bytes match Cycle-1 (audio hash), the cleaned transcript
+      // is reused with ZERO extra AI calls. A different audio (e.g. a fresh
+      // doctor dictation) runs the full transcribe+cleanup pipeline instead.
+      const stages = deps.groqStages;
+      const audioHash = sha256Hex(input.audioBase64);
+      let cleanedDecisionText: string;
+      if (prior.transcript !== null && prior.transcript.audioHash === audioHash) {
+        decisionTranscript = prior.transcript;
+        cleanedDecisionText = prior.transcript.cleaned;
+      } else {
+        const audioInput = {
+          audioBase64: input.audioBase64,
+          ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        };
+        const rawDecision =
+          stages !== undefined ? await stages.transcribe(audioInput) : await transcribeAudio(audioInput);
+        const ctx = await cleanupContext(db, session);
+        const cleanedDecision =
+          stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
+        decisionTranscript = {
+          raw: rawDecision,
+          cleaned: cleanedDecision.cleanedText,
+          segments: cleanedDecision.segments,
+          cleanedAt: new Date().toISOString(),
+          model: resolveGroqConfig().chatModel,
+          audioHash,
+        };
+        cleanedDecisionText = cleanedDecision.cleanedText;
+      }
+      const synthesisJson =
+        stages !== undefined
+          ? await stages.analyze({
+              systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+              cleanedText: cleanedDecisionText,
+              contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+            })
+          : await analyzeCleanedTranscript({
+              systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
+              cleanedText: cleanedDecisionText,
+              contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
+            });
+      synthesis = parseCycleJson<Cycle2Synthesis>(cycle2SynthesisSchema, synthesisJson);
+    } else {
+      synthesis = await synthesizeDoctorDecision({
+        audioBase64: input.audioBase64,
+        ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
+        cycle1Context: prior.cycle1,
+      });
     }
-    const synthesisJson =
-      stages !== undefined
-        ? await stages.analyze({
-            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
-            cleanedText: cleanedDecisionText,
-            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
-          })
-        : await analyzeCleanedTranscript({
-            systemPrompt: CYCLE_2_SYNTHESIS_PROMPT,
-            cleanedText: cleanedDecisionText,
-            contextText: `CYCLE_1_CONTEXT_JSON:\n${JSON.stringify(prior.cycle1)}`,
-          });
-    synthesis = parseCycleJson<Cycle2Synthesis>(cycle2SynthesisSchema, synthesisJson);
-  } else {
-    synthesis = await synthesizeDoctorDecision({
-      audioBase64: input.audioBase64,
-      ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
-      cycle1Context: prior.cycle1,
-    });
+  } catch (err) {
+    await db.scribeSession.updateMany({
+      where: { id: sessionId, status: { not: 'COMMITTED' } },
+      data: { status: 'FAILED' },
+    }).catch(() => {});
+    throw err;
   }
 
   const saveAudio = deps.saveAudio ?? saveScribeAudio;

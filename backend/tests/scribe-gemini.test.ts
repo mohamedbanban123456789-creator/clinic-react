@@ -1090,10 +1090,53 @@ delete process.env['GEMINI_MODEL'];
   );
 }
 
+// ---------------------------------------------------------------------------
+// 19. P1-9: Scribe cycle failure marks session FAILED, retry recovers without reload.
+// ---------------------------------------------------------------------------
+{
+  const state = emptyState();
+  const db = makeFakeDb(state);
+
+  const started = await startScribeSession(CONSENTED_START, DOCTOR, db);
+
+  const cycle1Json = JSON.stringify({
+    chiefComplaint: 'Follow-up anxiety',
+    symptoms: ['broken sleep'],
+    moodAndAffect: 'Stable',
+    suggestions: ['Keep sleep hygiene'],
+    evidence: [],
+  });
+
+  let shouldFail = true;
+  const stages = {
+    transcribe: async (): Promise<string> => {
+      if (shouldFail) throw new Error('Simulated STT outage');
+      return 'RAW';
+    },
+    cleanup: async () => ({ segments: [{ speaker: 'patient' as const, text: 'x' }], cleanedText: 'المريضة: x' }),
+    analyze: async () => cycle1Json,
+  };
+  const deps = { groqStages: stages, saveAudio: noopSaveAudio };
+
+  // Cycle 1 fails
+  await assert.rejects(
+    () => runCycle1Consultation(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db),
+    /Simulated STT outage/,
+  );
+  assert.equal(state.sessions.get(started.sessionId)!.status, 'FAILED', 'failure marks session FAILED');
+
+  // Retry Cycle 1 recovers
+  shouldFail = false;
+  const c1 = await runCycle1Consultation(started.sessionId, { audioBase64: FAKE_AUDIO }, DOCTOR, deps, db);
+  assert.equal(c1.sessionId, started.sessionId);
+  assert.equal(state.sessions.get(started.sessionId)!.status, 'TRANSCRIBING', 'retry moves session to TRANSCRIBING');
+}
+
 // Restore key env (do not leak test mutations).
 if (savedKey !== undefined) process.env['GEMINI_API_KEY'] = savedKey;
 if (savedModel !== undefined) process.env['GEMINI_MODEL'] = savedModel;
 
 // eslint-disable-next-line no-console
 console.log('Sprint 6 scribe Gemini 2-cycle foundation green (mocked, no live key).');
+
 
