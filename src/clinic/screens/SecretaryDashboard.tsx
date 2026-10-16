@@ -319,8 +319,8 @@ export default function SecretaryDashboard() {
               ? `بدأت منذ ${arNum(minutesSince(stats.current[0].calledAt))} دقيقة`
               : "لا جلسة جارية"
           }
-          icon="heart"
-          tone="blue"
+          icon="activity"
+          tone="teal"
         />
         <StatCard
           label="زيارات مكتملة"
@@ -348,7 +348,7 @@ export default function SecretaryDashboard() {
               <p>يُرتب الطابور تلقائيًا حسب الوصول مع أولوية الحالات الطارئة.</p>
             </div>
             {isDoctor && (
-              <AppButton icon="phone" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || stats.waiting.length === 0}>
+              <AppButton icon="userCheck" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || stats.waiting.length === 0}>
                 استدعاء التالي
               </AppButton>
             )}
@@ -358,7 +358,7 @@ export default function SecretaryDashboard() {
             <div className="call-request-banner">
               <div className="call-request-info">
                 <div className="call-request-icon">
-                  <Icon name="phone" size={20} />
+                  <Icon name="userCheck" size={20} />
                 </div>
                 <div>
                   <div className="call-request-title-row">

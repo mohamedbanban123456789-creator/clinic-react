@@ -35,7 +35,7 @@ function MedicationCard({
 }) {
   return (
     <div className="med-card">
-      <div className={`med-icon ${["violet", "teal", "blue", "amber"][Math.abs(med.drugName.length) % 4]}`}>
+      <div className="med-icon teal">
         <Icon name="pill" />
       </div>
       <div>
@@ -161,23 +161,92 @@ export default function MedicationsScreen() {
   const patientName = patientQuery.data?.fullName ?? current?.displayName ?? "—"
 
   if (!resolvedPatientId) {
+    /* Bento layout — never let one small card float in a sea of navy:
+       the main selector sits beside today's live queue and a tips card. */
+    const waitingPatients = entries.filter((e) => e.status === "WAITING")
+    const inRoom = entries.find((e) => e.status === "IN_CONSULTATION")
     return (
-      <div className="med-layout">
-        <section className="med-main">
-          <div className="card med-patient">
-            <div className="patient-heading compact">
-              <span className="patient-avatar large">؟</span>
+      <div className="med-bento">
+        <section className="card med-patient bento-main">
+          <div className="patient-heading compact">
+            <span className="patient-avatar large">؟</span>
+            <div>
+              <span className="id-label">الخطة الدوائية</span>
+              <h3>اختر مريضًا لعرض أدويته</h3>
+              <p>افتح ملف مريض أو استخدم جلسة جارية لعرض الخطة الدوائية وتعديلها.</p>
+            </div>
+          </div>
+          <AppButton icon="users" onClick={() => navigate("/doctor/patients")}>
+            بحث في ملفات المرضى
+          </AppButton>
+          {inRoom && (
+            <button
+              type="button"
+              className="bento-inline-link"
+              onClick={() => navigate(`/doctor/medications/${inRoom.patientId}`)}
+            >
+              <Icon name="activity" size={15} />
+              الجلسة الجارية: {inRoom.displayName} — افتح خطته الآن
+            </button>
+          )}
+        </section>
+
+        <aside className="side-stack bento-side">
+          <section className="card">
+            <div className="card-header">
               <div>
-                <span className="id-label">الخطة الدوائية</span>
-                <h3>اختر مريضًا</h3>
-                <p>افتح ملف مريض أو استخدم جلسة جارية لعرض الخطة الدوائية.</p>
+                <span className="section-kicker">مباشر الآن</span>
+                <h3>طابور اليوم</h3>
+                <p>
+                  {waitingPatients.length > 0
+                    ? `${arNum(waitingPatients.length)} مريضًا في الانتظار`
+                    : "لا انتظار حاليًا"}
+                </p>
               </div>
             </div>
-            <AppButton icon="users" onClick={() => navigate("/doctor/patients")}>
-              بحث في ملفات المرضى
-            </AppButton>
-          </div>
-        </section>
+            {waitingPatients.length === 0 && (
+              <p className="bento-muted">
+                عند تسجيل الحضور سيظهر المرضى هنا، وتفتح الخطة الدوائية لأي منهم بضغطة واحدة.
+              </p>
+            )}
+            <div className="bento-queue">
+              {waitingPatients.slice(0, 5).map((e, i) => (
+                <button
+                  type="button"
+                  key={e.entryId}
+                  onClick={() => navigate(`/doctor/medications/${e.patientId}`)}
+                >
+                  <span className="queue-number">{arNum(i + 1)}</span>
+                  <span className="bento-queue-name">{e.displayName}</span>
+                  <span className="text-link">الخطة</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="card-header">
+              <div>
+                <span className="section-kicker">مساعدة سريعة</span>
+                <h3>نصائح الخطة الدوائية</h3>
+              </div>
+            </div>
+            <ul className="bento-tips">
+              <li>
+                <Icon name="plus" size={15} />
+                أضف الدواء بالاسم العلمي أو التجاري مع الجرعة والتكرار بوضوح.
+              </li>
+              <li>
+                <Icon name="edit" size={15} />
+                تعديل الجرعة يؤرشف السجل القديم — يبقى تتبع التعديلات كاملًا.
+              </li>
+              <li>
+                <Icon name="alert" size={15} />
+                لا يوجد فحص تعارضات آلي — راجع التعارضات بنفسك قبل أي إضافة.
+              </li>
+            </ul>
+          </section>
+        </aside>
       </div>
     )
   }

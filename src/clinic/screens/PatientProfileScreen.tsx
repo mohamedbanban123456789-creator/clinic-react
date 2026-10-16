@@ -310,7 +310,7 @@ export default function PatientProfileScreen() {
                 تقرير سابق
               </AppButton>
               <AppButton
-                icon="mic"
+                icon="activity"
                 onClick={() => navigate(`/doctor/session?patient=${patient.id}`)}
               >
                 بدء جلسة جديدة

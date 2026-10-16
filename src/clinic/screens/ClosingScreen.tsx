@@ -340,7 +340,7 @@ export default function ClosingScreen() {
           suffix="ج.م."
           hint={`${arNum(aggregates.pettyRows.length)} بند مسجل`}
           icon="receipt"
-          tone="amber"
+          tone="coral"
         />
         <StatCard
           label={isOpen ? "صافي نقدي مبدئي" : "صافي النقدية"}
@@ -352,8 +352,8 @@ export default function ClosingScreen() {
           )}
           suffix="ج.م."
           hint={isOpen ? "تقديري — يُثبّت عند الإغلاق" : "بعد المصروفات النقدية"}
-          icon="chart"
-          tone="blue"
+          icon="banknote"
+          tone="teal"
         />
       </section>
 

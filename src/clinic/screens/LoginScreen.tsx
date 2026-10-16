@@ -100,8 +100,11 @@ export default function LoginScreen() {
               </span>
             </div>
           )}
-          <label className="field">
+          <label className="field has-lead-icon">
             <span>البريد الإلكتروني أو اسم المستخدم</span>
+            <span className="field-icon lead" aria-hidden="true">
+              <Icon name="user" size={17} />
+            </span>
             <input
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
@@ -110,8 +113,11 @@ export default function LoginScreen() {
               autoComplete="username"
             />
           </label>
-          <label className="field password-field">
+          <label className="field password-field has-lead-icon">
             <span>كلمة المرور</span>
+            <span className="field-icon lead" aria-hidden="true">
+              <Icon name="lock" size={17} />
+            </span>
             <input
               type={showPassword ? "text" : "password"}
               value={password}

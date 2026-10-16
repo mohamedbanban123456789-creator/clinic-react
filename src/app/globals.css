@@ -205,9 +205,58 @@ a:focus-visible, [tabindex]:focus-visible {
 }
 
 /* =====================================================================
-   Background — single neutral navy gradient (see :root --page-bg).
-   No watermark, no aurora mesh, no blurred orbs (design review C).
+   Background — neutral navy base (see :root --page-bg) + atmospheric
+   ambient glow layer. The 3D text watermark is gone for good; instead
+   two very soft, STATIC teal/petrol light blobs (the look of a 140px
+   blur, rendered as radial-gradient discs — zero filter/GPU cost) sit
+   behind the glass so every panel reads as real depth, like Linear or
+   Stripe. A faint 4rem engineering grid adds quiet geometric texture.
    ===================================================================== */
+
+::selection { background: oklch(0.74 0.11 190); color: oklch(0.12 0.02 240); }
+
+.ambient-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.ambient-glow {
+  position: absolute;
+  border-radius: 50%;
+  will-change: auto;
+  transform: translateZ(0);
+}
+/* Teal aura — upper area, mirrors the primary accent */
+.ambient-glow.glow-a {
+  width: 620px; height: 520px;
+  top: -8%; inset-inline-end: 12%;
+  background: radial-gradient(closest-side, oklch(0.62 0.11 190 / 0.11), oklch(0.62 0.11 190 / 0.05) 55%, transparent 72%);
+}
+/* Petrol/cyan aura — lower area, cool depth */
+.ambient-glow.glow-b {
+  width: 540px; height: 440px;
+  bottom: -10%; inset-inline-start: 16%;
+  background: radial-gradient(closest-side, oklch(0.5 0.1 225 / 0.09), oklch(0.5 0.1 225 / 0.04) 55%, transparent 72%);
+}
+/* A third whisper of mint keeps the middle band from feeling flat */
+.ambient-glow.glow-c {
+  width: 420px; height: 360px;
+  top: 38%; inset-inline-start: 38%;
+  background: radial-gradient(closest-side, oklch(0.55 0.09 170 / 0.05), transparent 70%);
+}
+/* Faint engineering grid — 3/255 white hairlines on a 4rem rhythm */
+.ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 0.028) 1px, transparent 1px);
+  background-size: 4rem 4rem;
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, oklch(0 0 0 / 0.9), transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, oklch(0 0 0 / 0.9), transparent 75%);
+}
 
 /* Denser fallback when backdrop-filter is unsupported */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -543,12 +592,15 @@ a:focus-visible, [tabindex]:focus-visible {
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn-primary {
   color: oklch(1 0 0);
-  background: linear-gradient(135deg, oklch(0.72 0.11 190) 0%, oklch(0.58 0.11 192) 100%);
+  background: linear-gradient(135deg, oklch(0.76 0.11 185) 0%, oklch(0.72 0.13 165) 100%);
+  border-color: oklch(0.85 0.09 185 / 0.4);
+  border-top-color: oklch(1 0 0 / 0.5);
   box-shadow:
     inset 0 1px 1px 0 oklch(1 0 0 / 0.45),
-    0 10px 24px -6px oklch(0.55 0.1 190 / 0.45);
+    0 10px 24px -6px oklch(0.62 0.11 185 / 0.45),
+    0 2px 8px -2px oklch(0.62 0.11 185 / 0.3);
 }
-.btn-primary:hover:not(:disabled) { filter: brightness(1.12); }
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
 .btn-secondary {
   color: var(--text-strong);
   background: linear-gradient(160deg, oklch(1 0 0 / 0.25) 0%, oklch(1 0 0 / 0.08) 100%);
@@ -720,9 +772,24 @@ a:focus-visible, [tabindex]:focus-visible {
 .field textarea { height: 110px; padding-top: 12px; resize: vertical; line-height: 1.7; }
 .field input:focus, .field select:focus, .field textarea:focus, .composer input:focus {
   outline: none;
-  border-color: oklch(1 0 0 / 0.5);
-  box-shadow: 0 0 0 3px oklch(1 0 0 / 0.2);
+  border-color: oklch(0.85 0.1 190 / 0.75);
+  box-shadow: 0 0 0 3px oklch(0.74 0.11 190 / 0.35);
 }
+
+/* In-field glyphs — soft gray icons living inside the inputs
+   (user on identity, lock on password), never competing with text. */
+.field-icon {
+  position: absolute;
+  bottom: 14px;
+  color: oklch(1 0 0 / 0.6);
+  pointer-events: none;
+  display: inline-flex;
+  z-index: 1;
+}
+.field-icon.lead { inset-inline-start: 15px; }
+.field-icon.tail { inset-inline-end: 15px; }
+.field.has-lead-icon input { padding-inline-start: 46px; }
+.field.has-tail-icon input { padding-inline-end: 46px; }
 .field input:disabled, .field select:disabled, .field textarea:disabled { opacity: 0.55; }
 .field > small { color: var(--muted); font-size: 13px; }
 
@@ -808,12 +875,15 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   box-shadow: inset 0 1px 1px 0 oklch(1 0 0 / 0.22);
   color: oklch(1 0 0 / 0.9);
 }
-/* Unified neutral glass tiles — the tone only tints the icon + a soft wash. */
-.stat-card.violet .stat-icon { color: oklch(0.8 0.11 280); background: linear-gradient(150deg, oklch(0.62 0.08 280 / 0.30) 0%, oklch(1 0 0 / 0.05) 100%); }
-.stat-card.amber .stat-icon { color: oklch(0.85 0.13 75); background: linear-gradient(150deg, oklch(0.6 0.08 75 / 0.28) 0%, oklch(1 0 0 / 0.05) 100%); }
-.stat-card.mint .stat-icon { color: oklch(0.8 0.14 165); background: linear-gradient(150deg, oklch(0.55 0.08 165 / 0.28) 0%, oklch(1 0 0 / 0.05) 100%); }
-.stat-card.blue .stat-icon { color: oklch(0.76 0.11 225); background: linear-gradient(150deg, oklch(0.55 0.08 225 / 0.30) 0%, oklch(1 0 0 / 0.05) 100%); }
-.stat-card.coral .stat-icon { color: oklch(0.78 0.15 25); background: linear-gradient(150deg, oklch(0.55 0.09 25 / 0.28) 0%, oklch(1 0 0 / 0.05) 100%); }
+/* Unified soft-tint tiles (medical-system rule): the color lives in the
+   icon and a hairline border only — the tile itself stays translucent
+   glass (~ /0.15), never a solid saturated block. */
+.stat-card.violet .stat-icon { color: oklch(0.8 0.11 280); background: linear-gradient(150deg, oklch(0.62 0.08 280 / 0.15) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.72 0.12 280 / 0.26); }
+.stat-card.amber .stat-icon { color: oklch(0.85 0.13 75); background: linear-gradient(150deg, oklch(0.6 0.08 75 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.8 0.14 75 / 0.26); }
+.stat-card.mint .stat-icon { color: oklch(0.8 0.14 165); background: linear-gradient(150deg, oklch(0.55 0.08 165 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.72 0.15 160 / 0.26); }
+.stat-card.teal .stat-icon { color: oklch(0.82 0.11 190); background: linear-gradient(150deg, oklch(0.55 0.09 190 / 0.15) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.74 0.11 190 / 0.26); }
+.stat-card.blue .stat-icon { color: oklch(0.76 0.11 225); background: linear-gradient(150deg, oklch(0.55 0.08 225 / 0.15) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.68 0.12 225 / 0.26); }
+.stat-card.coral .stat-icon { color: oklch(0.78 0.15 25); background: linear-gradient(150deg, oklch(0.55 0.09 25 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); border-color: oklch(0.7 0.16 25 / 0.26); }
 .stat-card > div { min-width: 0; flex: 1; }
 .stat-card p { color: oklch(1 0 0 / 0.86); font-size: 14px; margin: 2px 0 0; font-weight: 600; }
 .stat-card strong { display: block; font-size: 29px; line-height: 1.35; font-weight: 700; letter-spacing: 0; color: var(--text-strong); font-variant-numeric: tabular-nums; }
@@ -846,12 +916,12 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 /* Modal — liquid glass over a blurred dark backdrop (ZIP 2 dialog) */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: oklch(0.05 0.02 220 / 0.6);
+  background: oklch(0.04 0.015 220 / 0.62);
   z-index: 100;
   display: grid; place-items: center;
   padding: 20px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .modal {
   width: min(620px, 95vw);
@@ -1153,7 +1223,24 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 .live-dot {
   display: inline-block; width: 9px; height: 9px; border-radius: 50%;
   background: oklch(0.78 0.15 160);
-  box-shadow: 0 0 0 4px oklch(0.72 0.15 160 / 0.18);
+  position: relative;
+  flex: 0 0 auto;
+}
+/* Live pulse ring — the system feels awake (animate-ping equivalent) */
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: oklch(0.78 0.15 160 / 0.6);
+  animation: live-ping 1.9s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes live-ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after { animation: none; background: oklch(0.78 0.15 160 / 0.18); }
 }
 .next-person { display: flex; align-items: center; gap: 13px; margin: 18px 0; }
 .next-person h3 { margin: 0; font-size: 16.5px; color: var(--text-strong); }
@@ -1694,9 +1781,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   color: oklch(1 0 0 / 0.92);
 }
 .chart-legend i { width: 8px; height: 8px; border-radius: 50%; }
-.legend-indigo { background: oklch(0.72 0.12 280); }
-.legend-teal { background: oklch(0.74 0.11 190); }
-.legend-blue { background: oklch(0.68 0.12 225); }
+.legend-indigo { background: oklch(0.74 0.11 190); }
+.legend-teal { background: oklch(0.68 0.12 225); }
+.legend-blue { background: oklch(0.78 0.15 25); }
 .chart-legend small { color: var(--muted); }
 .chart-legend em { font-style: normal; font-weight: 700; }
 
@@ -2166,6 +2253,73 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 .med-main { display: flex; flex-direction: column; gap: 16px; }
 .med-patient { display: flex; align-items: center; padding: 17px 20px; flex-wrap: wrap; gap: 12px; }
 .med-patient .btn { margin-inline-start: auto; }
+
+/* Bento empty state (no patient chosen) — selector card + live queue +
+   tips card share the row so no screen region sits empty. */
+.med-bento {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  gap: 18px;
+  align-items: stretch;
+}
+.med-bento .bento-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 16px;
+  padding: 26px;
+}
+.med-bento .bento-main .btn { margin-inline-start: 0; }
+.bento-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid oklch(0.74 0.11 190 / 0.3);
+  background: oklch(0.55 0.09 190 / 0.12);
+  color: oklch(0.93 0.08 190);
+  border-radius: 14px;
+  padding: 11px 15px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: start;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.bento-inline-link:hover { background: oklch(0.55 0.09 190 / 0.2); border-color: oklch(0.74 0.11 190 / 0.45); }
+.bento-side { margin: 0; align-self: stretch; }
+.bento-muted {
+  margin: 0;
+  color: oklch(1 0 0 / 0.78);
+  font-size: 13.5px;
+  line-height: 1.8;
+  padding: 4px 22px 14px;
+}
+.bento-queue { display: flex; flex-direction: column; gap: 8px; padding: 0 16px 18px; }
+.bento-queue > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--chip-bg);
+  border-radius: 14px;
+  padding: 11px 13px;
+  color: var(--text);
+  text-align: start;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.bento-queue > button:hover { border-color: oklch(0.74 0.11 190 / 0.35); background: oklch(0.55 0.09 190 / 0.1); }
+.bento-queue-name { flex: 1; min-width: 0; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bento-queue .text-link { padding: 0; flex: 0 0 auto; }
+.bento-tips { list-style: none; margin: 0; padding: 0 20px 20px; display: grid; gap: 11px; }
+.bento-tips li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: oklch(1 0 0 / 0.84);
+  font-size: 13.5px;
+  line-height: 1.75;
+}
+.bento-tips li .icon { margin-top: 4px; color: oklch(0.88 0.08 190); }
 .medication-list { padding-bottom: 10px; }
 .count-pill {
   color: oklch(0.96 0.08 190);
@@ -2194,9 +2348,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   border-top-color: oklch(1 0 0 / 0.26);
   color: oklch(1 0 0 / 0.8);
 }
-.med-icon.violet { background: linear-gradient(150deg, oklch(0.62 0.08 280 / 0.30) 0%, oklch(1 0 0 / 0.05) 100%); color: oklch(0.8 0.11 280); border-color: oklch(1 0 0 / 0.12); }
-.med-icon.teal { background: linear-gradient(150deg, oklch(0.55 0.08 185 / 0.28) 0%, oklch(1 0 0 / 0.05) 100%); color: oklch(0.78 0.12 190); border-color: oklch(1 0 0 / 0.12); }
-.med-icon.coral { background: linear-gradient(150deg, oklch(0.55 0.09 25 / 0.28) 0%, oklch(1 0 0 / 0.05) 100%); color: oklch(0.78 0.15 25); border-color: oklch(1 0 0 / 0.12); }
+.med-icon.violet { background: linear-gradient(150deg, oklch(0.62 0.08 280 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); color: oklch(0.8 0.11 280); border-color: oklch(0.72 0.12 280 / 0.24); }
+.med-icon.teal { background: linear-gradient(150deg, oklch(0.55 0.08 185 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); color: oklch(0.78 0.12 190); border-color: oklch(0.74 0.11 190 / 0.24); }
+.med-icon.coral { background: linear-gradient(150deg, oklch(0.55 0.09 25 / 0.14) 0%, oklch(1 0 0 / 0.04) 100%); color: oklch(0.78 0.15 25); border-color: oklch(0.7 0.16 25 / 0.24); }
 .med-name { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .med-name h3 { margin: 0; font-size: 14.5px; color: var(--text-strong); }
 .med-name > span { padding: 3px 9px; border-radius: 999px; font-size: 13px; font-weight: 700; }
@@ -2387,6 +2541,27 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   place-items: center;
   padding: 24px;
   position: relative;
+  overflow: clip;
+}
+/* Atmospheric login backdrop — same calm teal/petrol auras as the shell
+   (radial-gradient discs, static, zero filter cost). */
+.login-page::before,
+.login-page::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+.login-page::before {
+  width: 640px; height: 540px;
+  top: -12%; inset-inline-start: 8%;
+  background: radial-gradient(closest-side, oklch(0.62 0.11 190 / 0.12), oklch(0.62 0.11 190 / 0.05) 55%, transparent 72%);
+}
+.login-page::after {
+  width: 560px; height: 460px;
+  bottom: -14%; inset-inline-end: 10%;
+  background: radial-gradient(closest-side, oklch(0.5 0.1 225 / 0.10), oklch(0.5 0.1 225 / 0.04) 55%, transparent 72%);
 }
 .login-visual { display: none; }
 .copyright {
@@ -2420,7 +2595,7 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 .login-card .field { margin-bottom: 16px; }
 .password-field button {
   position: absolute;
-  inset-inline-start: 8px; bottom: 9px;
+  inset-inline-end: 8px; bottom: 9px;
   border: 0; background: transparent;
   color: oklch(1 0 0 / 0.78);
   width: 32px; height: 32px;
@@ -2428,6 +2603,11 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   border-radius: 8px;
 }
 .password-field button:hover { color: var(--text-strong); background: oklch(1 0 0 / 0.1); }
+/* Lock glyph leads, eye toggle trails — text breathes between them */
+.password-field input {
+  padding-inline-start: 46px;
+  padding-inline-end: 46px;
+}
 .remember { display: flex; align-items: center; gap: 9px; font-size: 13.5px; margin: 6px 0 20px; color: oklch(1 0 0 / 0.92); cursor: pointer; }
 .btn.full { width: 100%; height: 48px; }
 .login-error {
@@ -2464,11 +2644,33 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  position: relative;
   background:
     radial-gradient(ellipse 90% 55% at 50% -18%, oklch(0.22 0.03 245 / 0.55), transparent 70%),
     oklch(0.165 0.025 250);
   color: oklch(1 0 0);
+  overflow: clip;
 }
+/* Same atmospheric auras as the staff shell — calm teal/petrol discs */
+.display-screen::before,
+.display-screen::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+.display-screen::before {
+  width: 620px; height: 520px;
+  top: -10%; inset-inline-start: 10%;
+  background: radial-gradient(closest-side, oklch(0.62 0.11 190 / 0.11), oklch(0.62 0.11 190 / 0.05) 55%, transparent 72%);
+}
+.display-screen::after {
+  width: 540px; height: 440px;
+  bottom: -12%; inset-inline-end: 12%;
+  background: radial-gradient(closest-side, oklch(0.5 0.1 225 / 0.09), oklch(0.5 0.1 225 / 0.04) 55%, transparent 72%);
+}
+.display-header, .display-body, .display-footer { position: relative; z-index: 1; }
 .display-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 32px; }
 .display-header .brand { display: flex; align-items: center; gap: 12px; }
 .display-header .brand strong { font-size: 19px; display: block; color: oklch(1 0 0); }
@@ -2498,7 +2700,25 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 .display-queue { background: oklch(1 0 0 / 0.08); border: 1px solid oklch(1 0 0 / 0.14); border-top-color: oklch(1 0 0 / 0.22); border-radius: 24px; padding: 22px; backdrop-filter: blur(10px) saturate(160%); -webkit-backdrop-filter: blur(10px) saturate(160%); }
 .display-queue .mini-title { color: oklch(1 0 0); display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; margin-bottom: 15px; }
 .display-queue .live-dot { background: oklch(0.78 0.15 160); }
-.display-empty { color: oklch(1 0 0 / 0.8); font-size: 13px; }
+/* Respectable empty states — line-art glyph + calm copy, never a bare line */
+.display-idle-icon {
+  display: grid; place-items: center;
+  width: 86px; height: 86px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  color: oklch(0.85 0.08 190);
+  background: oklch(0.55 0.09 190 / 0.12);
+  border: 1px solid oklch(0.74 0.11 190 / 0.25);
+}
+.display-empty {
+  display: grid; place-items: center; gap: 5px;
+  padding: 16px 0 10px;
+  text-align: center;
+  color: oklch(1 0 0 / 0.8);
+}
+.display-empty > svg { color: oklch(0.9 0.07 190 / 0.85); }
+.display-empty p { margin: 0; font-size: 15.5px; font-weight: 700; color: oklch(1 0 0 / 0.94); }
+.display-empty small { color: oklch(1 0 0 / 0.75); font-size: 13px; }
 .display-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .display-tile {
   background: oklch(0.98 0 0 / 0.92);
@@ -2572,6 +2792,7 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   .main-shell { width: 100%; }
   .session-layout, .soap-layout, .med-layout, .profile-layout,
   .two-col-layout, .payment-layout { grid-template-columns: minmax(0, 1fr); }
+  .med-bento { grid-template-columns: minmax(0, 1fr); }
   .mse-panel, .invoice-summary { position: static; }
   .session-time { margin-inline-start: 0; }
   .doctor-hero { flex-direction: column; align-items: flex-start; }
@@ -2602,6 +2823,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   .login-card > p { margin: 0 0 12px; font-size: 13px; }
   .login-card .field { margin-bottom: 9px; }
   .login-card .field input { height: 40px; padding: 8px 13px; }
+  .login-card .field-icon { bottom: 11px; }
+  .login-card .field.has-lead-icon input { padding-inline-start: 42px; }
+  .login-card .field.has-tail-icon input { padding-inline-end: 42px; }
   .mobile-brand { margin-bottom: 10px; }
   .section-kicker { margin-bottom: 2px; }
   .remember { margin: 3px 0 10px; }

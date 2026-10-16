@@ -98,8 +98,11 @@ export default function ChangePasswordScreen() {
               </span>
             </div>
           )}
-          <label className="field">
+          <label className="field has-lead-icon">
             <span>كلمة المرور الحالية</span>
+            <span className="field-icon lead" aria-hidden="true">
+              <Icon name="lock" size={17} />
+            </span>
             <input
               type="password"
               value={oldPassword}
@@ -108,8 +111,11 @@ export default function ChangePasswordScreen() {
               autoComplete="current-password"
             />
           </label>
-          <label className="field">
+          <label className="field has-lead-icon">
             <span>كلمة المرور الجديدة (٨ أحرف على الأقل)</span>
+            <span className="field-icon lead" aria-hidden="true">
+              <Icon name="lock" size={17} />
+            </span>
             <input
               type="password"
               value={newPassword}
@@ -117,8 +123,11 @@ export default function ChangePasswordScreen() {
               autoComplete="new-password"
             />
           </label>
-          <label className="field">
+          <label className="field has-lead-icon">
             <span>تأكيد كلمة المرور الجديدة</span>
+            <span className="field-icon lead" aria-hidden="true">
+              <Icon name="check" size={17} />
+            </span>
             <input
               type="password"
               value={confirmPassword}

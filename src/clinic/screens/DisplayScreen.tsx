@@ -67,8 +67,11 @@ export default function DisplayScreen() {
             </>
           ) : (
             <>
+              <span className="display-idle-icon" aria-hidden="true">
+                <Icon name="activity" size={40} />
+              </span>
               <h1 className="display-number">—</h1>
-              <small>لا يوجد مريض مع الطبيب حاليًا</small>
+              <small>لا يوجد مريض مع الطبيب حاليًا — سيظهر الدور هنا فور الاستدعاء</small>
             </>
           )}
         </section>
@@ -77,7 +80,13 @@ export default function DisplayScreen() {
           <div className="mini-title">
             <span className="live-dot" /> التالي ({arNum(waiting.length)})
           </div>
-          {waiting.length === 0 && <p className="display-empty">لا مرضى في الانتظار الآن.</p>}
+          {waiting.length === 0 && (
+            <div className="display-empty">
+              <Icon name="users" size={28} />
+              <p>لا مرضى في الانتظار الآن</p>
+              <small>سيظهر الطابور هنا تلقائيًا فور تسجيل الحضور في الاستقبال</small>
+            </div>
+          )}
           <div className="display-grid">
             {waiting.slice(0, 8).map((e, i) => (
               <div className="display-tile" key={e.entryId}>

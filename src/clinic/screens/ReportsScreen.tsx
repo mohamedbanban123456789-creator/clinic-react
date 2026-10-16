@@ -26,8 +26,8 @@ import { arDate, arNum, arDateTime, moneyMinor, arPercent } from "@/clinic/lib/f
 import { shiftResultLabel } from "@/clinic/lib/constants"
 
 /* Glass-design chart palette (dark surfaces) */
-const primary = "oklch(0.72 0.19 290)" // violet — donut/legend "نقدي"
-const teal = "oklch(0.8 0.15 200)" // sky — donut/legend "أخرى"
+const primary = "oklch(0.74 0.11 190)" // teal — donut/legend "نقدي" (primary cash)
+const teal = "oklch(0.68 0.12 225)" // blue — donut/legend "أخرى"
 const blue = "oklch(0.75 0.15 220)" // info — legend "عكس عمليات"
 
 export default function ReportsScreen() {
@@ -159,8 +159,8 @@ export default function ReportsScreen() {
                   value={arNum(cashPart / 100)}
                   suffix="ج.م."
                   hint={arPercent(cashPart, gross || 1)}
-                  icon="chart"
-                  tone="blue"
+                  icon="banknote"
+                  tone="teal"
                 />
                 <StatCard
                   label="مصروفات نثرية"
@@ -168,7 +168,7 @@ export default function ReportsScreen() {
                   suffix="ج.م."
                   hint={`إيداعات: ${arNum((cash?.pettyInjectionMinor ?? 0) / 100)} ج.م.`}
                   icon="receipt"
-                  tone="amber"
+                  tone="coral"
                 />
                 <StatCard
                   label="نتيجة المطابقة"
@@ -181,7 +181,7 @@ export default function ReportsScreen() {
                       : "—"
                   }
                   icon="check"
-                  tone={cash?.reconciliationPassed ? "blue" : "coral"}
+                  tone={cash?.reconciliationPassed ? "mint" : "coral"}
                 />
               </section>
 

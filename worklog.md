@@ -131,3 +131,71 @@ Stage Summary:
 - App fully functional end-to-end after changes; QA DB state: 10-16 closed (عجز), 10-17 OPEN
 - Open question for owner: reception discount ceiling fields (secretaryMaxDiscount) are ACTIVELY
   used by backend billing/reconciliation — left in Settings, awaiting removal decision
+
+---
+Task ID: 7
+Agent: main (Super Z)
+Task: Owner's visual-polish review — atmospheric glow background, unified
+medical color system, Lucide icon semantics, Bento empty states, login/modal
+finish (teal focus rings, in-field glyphs, CTA gradient), live-dot pulse
+
+Work Log:
+- Surveyed current state via fresh BEFORE screenshots + VLM (login/doctor-dash/
+  medications/reports/session) in download/review3/
+- 1) Atmospheric Glow background (replaces dead-flat navy after watermark removal):
+  * AppShell now renders .ambient-layer (fixed, pointer-events-none, z-0) with 3
+    radial-gradient discs (teal 0.11 / petrol 0.09 / mint 0.05 alphas) + faint 4rem
+    engineering grid (white 0.028 hairlines, radial-masked) — Linear/Stripe look
+  * Same auras added to .login-page::before/::after and .display-screen::before/::after
+  * Rendered as gradient discs, NOT filter:blur — preserves GPU budget from task 4/6
+  * ::selection now teal
+- 2) Unified medical palette on stat tiles: soft-tint rule enforced — tile bg
+  alpha 0.28-0.30 -> 0.14-0.15, tone color lives in icon + hairline border only;
+  new .stat-card.teal tone; med-icon tones softened + active meds unified to teal
+  (was 4-color carousel); reports donut violet -> teal/blue/rose + legend matched
+- 3) Lucide icon semantics (icon map extended, strokeWidth 1.7 -> 1.5 unified):
+  * NEW icons: user, userCheck, activity, clipboardCheck, banknote, timer
+  * Session nav + "متابعة/بدء جلسة": mic -> activity (mic kept ONLY for real
+    voice-recording in SessionScreen scribe)
+  * "تقارير للمراجعة" + review-card: sparkle -> clipboardCheck (sparkle now
+    reserved strictly for AI in SOAP/Session screens)
+  * "طلب المريض التالي"/"استدعاء التالي"/call banners: phone -> userCheck
+  * "صافي نقدي/نقدي": chart -> banknote; "متوسط الجلسة": chart -> timer
+  * "مع الطبيب": heart -> activity (teal)
+- 4) live-dot: box-shadow halo -> ::after ping animation (1.9s, scale 1->2.6,
+  reduced-motion safe) — "حالة اليوم: مفتوح للتحصيل" now feels alive
+- 5) Bento empty state for MedicationsScreen (was one small card in navy sea):
+  main selector card + inline live-session link + side stack (today's queue with
+  one-click per-patient med-plan links + safety tips card); responsive 1-col at 1024
+- 6) Login & modal finish:
+  * modal-backdrop: 0.60 -> 0.62 alpha, blur 8 -> 12px (backdrop-blur-md feel)
+  * btn-primary: single teal -> teal->emerald gradient + soft glow shadow
+  * ALL field focus rings: white -> teal (border oklch 0.85 0.1 190 + 3px ring)
+  * In-field glyphs: user icon leads identifier, lock leads password (eye moved
+    to inline-end — fixes pre-existing eye/text overlap in RTL), compact-height
+    variants tuned; ChangePassword fields got lock/check glyphs too
+  * .field-icon system (lead/tail + has-lead/tail-icon paddings, 40px compact)
+- 7) Display screen (/display): same ambient auras + respectable empty states
+  (activity pulse glyph for idle "الدور الآن", users glyph + guidance copy for
+  empty queue)
+- Tone remap per owner's golden rule: expenses/deficit amber -> coral (rose),
+  reconciliation pass blue -> mint, net cash blue -> teal
+- Verification: tsc 0 errors in src/; both live sessions (doctor + secretary
+  parallel agent-browser sessions) ZERO console/page errors; full clinic loop
+  re-run green: check-in Hala -> bento queue shows her -> click navigates to her
+  med plan -> doctor call request (ReviewModal confirm) -> secretary approval ->
+  live session -> visit completion (POST 200); mobile 360px no horizontal
+  overflow (secretary dash + meds bento); VLM review: stat cards calm/unified,
+  blurred modal backdrop, teal focus rings visible, background depth confirmed —
+  before/after comparison rated 8.5/10 improvement
+- Note: doctor/secretary dashboards showing queue 0/0 after completion is
+  PRE-EXISTING snapshot/REST convergence behavior (useQueue untouched by this
+  task; git diff confirms all changes are visual-only: icons, tones, classNames, CSS)
+
+Stage Summary:
+- All six owner requests delivered: atmospheric glow background, unified soft-tint
+  palette, Lucide icon semantics (sparkle=AI only, no phone/mic misuse), Bento
+  empty states, login/modal finish, live-dot pulse
+- Deliverables: download/review3/ (5 before, 14 after, 5 comparisons),
+  scripts/make_review3_comparisons.py
+- Working credentials unchanged: doctor / Doctor2026!, secretary / Secretary2026!

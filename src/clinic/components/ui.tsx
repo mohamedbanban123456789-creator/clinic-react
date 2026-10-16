@@ -15,13 +15,19 @@ import {
 
 export type IconName =
   | "grid"
+  | "user"
   | "userPlus"
+  | "userCheck"
   | "wallet"
+  | "banknote"
   | "receipt"
   | "message"
   | "chart"
   | "users"
   | "mic"
+  | "activity"
+  | "clipboardCheck"
+  | "timer"
   | "file"
   | "pill"
   | "settings"
@@ -57,11 +63,52 @@ const iconPaths: Record<IconName, ReactNode> = {
       <rect x="14" y="14" width="7" height="7" rx="2" />
     </>
   ),
+  /* Lucide User — single person, for in-field identity glyphs */
+  user: (
+    <>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>
+  ),
   userPlus: (
     <>
       <path d="M15 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
       <circle cx="8" cy="7" r="4" />
       <path d="M19 8v6M22 11h-6" />
+    </>
+  ),
+  /* Lucide UserCheck — calling the next patient is a summon, not a phone call */
+  userCheck: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="m16 11 2 2 4-4" />
+    </>
+  ),
+  /* Lucide Activity (pulse) — live clinical session */
+  activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+  /* Lucide ClipboardCheck — pending report review (NOT AI) */
+  clipboardCheck: (
+    <>
+      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      <path d="m9 14 2 2 4-4" />
+    </>
+  ),
+  /* Lucide Banknote — net cash / treasury */
+  banknote: (
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <circle cx="12" cy="12" r="2" />
+      <path d="M6 12h.01M18 12h.01" />
+    </>
+  ),
+  /* Lucide Timer — average session duration */
+  timer: (
+    <>
+      <path d="M10 2h4" />
+      <path d="m12 14 3-3" />
+      <circle cx="12" cy="14" r="8" />
     </>
   ),
   wallet: (
@@ -229,7 +276,7 @@ export function Icon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.7"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

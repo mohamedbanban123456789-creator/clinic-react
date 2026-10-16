@@ -359,7 +359,7 @@ export default function DoctorDashboard() {
                 </AppButton>
                 <AppButton
                   variant="outline"
-                  icon="mic"
+                  icon="activity"
                   onClick={() =>
                     navigate(
                       `/doctor/session?patient=${current.patientId}&entry=${current.entryId}`,
@@ -379,7 +379,7 @@ export default function DoctorDashboard() {
               </>
             ) : (
               <AppButton
-                icon="phone"
+                icon="userCheck"
                 onClick={handleOpenCallReview}
                 disabled={
                   Boolean(queue?.activeCallRequest) ||
@@ -433,7 +433,7 @@ export default function DoctorDashboard() {
               ? `${arNum(unsignedQuery.data?.deferralCount ?? 0)} كشف مؤجل التوثيق`
               : "مسودات وزيارات غير موثقة"
           }
-          icon="sparkle"
+          icon="clipboardCheck"
           tone="blue"
         />
         <StatCard
@@ -441,8 +441,8 @@ export default function DoctorDashboard() {
           value={arNum(avgSession)}
           suffix="دقيقة"
           hint={completed.length > 0 ? "محسوب من زيارات اليوم" : "من إعدادات العيادة"}
-          icon="chart"
-          tone="blue"
+          icon="timer"
+          tone="teal"
         />
       </section>
 
@@ -454,7 +454,7 @@ export default function DoctorDashboard() {
               <h3>المرضى القادمون</h3>
             </div>
             <AppButton
-              icon="phone"
+              icon="userCheck"
               onClick={handleOpenCallReview}
               disabled={
                 Boolean(queue?.activeCallRequest) ||
@@ -470,7 +470,7 @@ export default function DoctorDashboard() {
             <div className="call-request-banner">
               <div className="call-request-info">
                 <div className="call-request-icon">
-                  <Icon name="phone" size={18} />
+                  <Icon name="userCheck" size={18} />
                 </div>
                 <div>
                   <strong className="call-request-title-row" style={{ fontSize: "15px", color: "var(--text-strong)" }}>
@@ -531,7 +531,7 @@ export default function DoctorDashboard() {
         <aside className="side-stack">
           <section className="card review-card">
             <div className="ai-icon">
-              <Icon name="sparkle" />
+              <Icon name="clipboardCheck" />
             </div>
             <span className="section-kicker">المراجعة والتوثيق</span>
             <h3>
@@ -763,7 +763,7 @@ export default function DoctorDashboard() {
                 إلغاء
               </AppButton>
               <AppButton
-                icon="phone"
+                icon="userCheck"
                 onClick={() => {
                   createCallRequestMutation.mutate({ entryId: pendingCallPatient.entryId })
                 }}

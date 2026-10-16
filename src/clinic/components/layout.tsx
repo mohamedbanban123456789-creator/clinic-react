@@ -51,7 +51,7 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
     items: [
       { to: "/doctor", label: "لوحة الطبيب", icon: "grid", match: ["/doctor"] },
       { to: "/doctor/patients", label: "ملفات المرضى", icon: "users", match: ["/doctor/patients", "/doctor/patients/"] },
-      { to: "/doctor/session", label: "الجلسة الحالية", icon: "mic", match: ["/doctor/session"] },
+      { to: "/doctor/session", label: "الجلسة الحالية", icon: "activity", match: ["/doctor/session"] },
       { to: "/doctor/medications", label: "إدارة الأدوية", icon: "pill", match: ["/doctor/medications"] },
     ],
   },
@@ -325,6 +325,15 @@ export function AppShell({ title, children }: { title: string; children: React.R
 
   return (
     <>
+      {/* Atmospheric background — static teal/petrol light blobs + faint
+          grid. Rendered as radial-gradient discs (no filter blur), so the
+          glassmorphism above reads with real depth at zero GPU cost. */}
+      <div className="ambient-layer" aria-hidden="true">
+        <div className="ambient-glow glow-a" />
+        <div className="ambient-glow glow-b" />
+        <div className="ambient-glow glow-c" />
+        <div className="ambient-grid" />
+      </div>
       <div className={`app ${navOpen ? "nav-open" : ""}`} dir="rtl">
         <Sidebar />
         {navOpen && (
