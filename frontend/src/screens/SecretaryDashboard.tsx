@@ -27,6 +27,7 @@ import {
   queueStatusLabel,
   queueStatusBadge,
   emergencyReasonLabel,
+  tSec,
 } from "@/lib/constants"
 import type { QueueEntryDto } from "@/api/types"
 
@@ -224,7 +225,9 @@ export default function SecretaryDashboard() {
 
   /* ----------------------------- Render ----------------------------- */
 
-  const rawName = user?.name && !/^\?+$/.test(user.name.trim()) ? user.name.trim() : (isDoctor ? "د. أحمد سامي" : "سارة محمود")
+  const rawName = user?.name && !/^\?+$/.test(user.name.trim())
+    ? user.name.trim()
+    : (isDoctor ? "د. أحمد سامي" : (user?.gender === "MALE" ? "أحمد محمود" : "سارة محمود"))
   const firstName = rawName.replace(/^د\.\s*/, "").split(" ")[0] || rawName
   const avgMin = settingsQuery.data?.avgConsultDurationMin ?? 20
 
@@ -241,7 +244,11 @@ export default function SecretaryDashboard() {
           <p>
             {stats.waiting.length > 0
               ? `لديك ${arNum(stats.waiting.length)} مرضى في الانتظار، ومتوسط وقت الكشف ${arNum(avgMin)} دقيقة.`
-              : "لا مرضى في الانتظار حاليًا. يمكنك تسجيل الحضور أو إضافة مريض جديد."}
+              : tSec(
+                  "لا مرضى في الانتظار حاليًا. يمكنك تسجيل الحضور أو إضافة مريض جديد.",
+                  "لا مرضى في الانتظار حاليًا. يمكنكِ تسجيل الحضور أو إضافة مريض جديد.",
+                  user?.gender,
+                )}
           </p>
         </div>
         <div className="quick-actions">

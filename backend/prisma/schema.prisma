@@ -17,6 +17,11 @@ enum Role {
   SECRETARY
 }
 
+enum Gender {
+  MALE
+  FEMALE
+}
+
 enum QueueStatus {
   WAITING
   IN_CONSULTATION
@@ -190,6 +195,7 @@ model User {
   identifier           String    @unique
   passwordHash         String    @map("password_hash")
   role                 Role      @default(SECRETARY)
+  gender               Gender    @default(FEMALE)
   isActive             Boolean   @default(true) @map("is_active")
   createdByUserId      String?   @map("created_by_user_id")
   lastLoginAt          DateTime? @map("last_login_at")

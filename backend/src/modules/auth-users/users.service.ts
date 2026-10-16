@@ -52,11 +52,12 @@ export async function createSecretary(
         identifier: input.identifier,
         passwordHash,
         role: 'SECRETARY',
+        gender: input.gender,
         isActive: true,
         passwordMustChange: true,
         createdByUserId: actor.userId,
       },
-      select: { id: true, name: true, identifier: true, role: true, isActive: true },
+      select: { id: true, name: true, identifier: true, role: true, gender: true, isActive: true },
     });
     await writeUserAudit(db, {
       actorUserId: actor.userId,
@@ -80,7 +81,7 @@ export async function listUsers(
 ): Promise<Array<ReturnType<typeof toManagedUserDto>>> {
   const rows = await db.user.findMany({
     orderBy: { createdAt: 'asc' },
-    select: { id: true, name: true, identifier: true, role: true, isActive: true },
+    select: { id: true, name: true, identifier: true, role: true, gender: true, isActive: true },
   });
   return rows.map((row) => toManagedUserDto(row));
 }

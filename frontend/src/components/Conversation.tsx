@@ -15,10 +15,13 @@ import { useAuth } from "@/auth/AuthContext"
 import { useToast } from "@/components/ui"
 import { Icon } from "@/components/ui"
 import { arTime } from "@/lib/format"
+import { usersApi } from "@/api/admin"
 import {
   doctorTemplates,
+  getDoctorTemplates,
   intercomTypeLabel,
   secretaryTemplates,
+  tSec,
   type IntercomType,
 } from "@/lib/constants"
 
@@ -39,6 +42,13 @@ export function Conversation({
   const queryClient = useQueryClient()
   const role = user?.role ?? "SECRETARY"
   const isDoctor = role === "DOCTOR"
+
+  const usersQuery = useQuery({
+    queryKey: ["users"],
+    queryFn: () => usersApi.list(),
+    enabled: isDoctor,
+    staleTime: 60_000,
+  })
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["intercom", "recent"],
@@ -107,21 +117,33 @@ export function Conversation({
     })
   }
 
-  const templates = isDoctor ? doctorTemplates : secretaryTemplates
-  const otherName = isDoctor ? "سارة محمود" : "الطبيب/ة"
+  const secUser =
+    usersQuery.data?.data.find((u) => u.role === "SECRETARY" && u.isActive) ??
+    usersQuery.data?.data.find((u) => u.role === "SECRETARY")
+  const secGender = secUser?.gender ?? "FEMALE"
+  const secName = secUser?.name || (secGender === "MALE" ? "أحمد محمود" : "سارة محمود")
+
+  const templates = isDoctor ? getDoctorTemplates(secGender) : secretaryTemplates
+  const otherName = isDoctor ? secName : "الطبيب/ة"
+  const avatarInitial = isDoctor ? (secName.trim().charAt(0) || "س") : "ط"
+  const statusText = isDoctor
+    ? connected
+      ? tSec("متصل الآن", "متصلة الآن", secGender)
+      : tSec("غير متصل — الرسائل تصل عند العودة", "غير متصلة — الرسائل تصل عند العودة", secGender)
+    : connected
+      ? "متصل الآن"
+      : "غير متصل — الرسائل تصل عند العودة"
 
   return (
     <div className={`conversation ${expanded ? "expanded" : ""}`}>
       <div className="conversation-header">
         <div className="online-avatar">
-          {isDoctor ? "س" : "ط"}
+          {avatarInitial}
           <i />
         </div>
         <div>
           <strong>{otherName}</strong>
-          <small>
-            {connected ? "متصلة الآن" : "غير متصلة — الرسائل تصل عند العودة"}
-          </small>
+          <small>{statusText}</small>
         </div>
         {expanded && (
           <span className="secure-chat">

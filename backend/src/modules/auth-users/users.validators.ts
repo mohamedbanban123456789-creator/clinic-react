@@ -15,6 +15,7 @@ export const createSecretarySchema = z.object({
   name: nonBlank('name', 120),
   identifier: nonBlank('identifier', 120),
   password: z.string({ required_error: 'password is required' }).min(8, 'password must be at least 8 characters').max(256),
+  gender: z.enum(['MALE', 'FEMALE']).default('FEMALE'),
 });
 
 export const userIdParamSchema = z.object({

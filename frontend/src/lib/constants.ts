@@ -5,6 +5,30 @@
  */
 
 export type Role = "SECRETARY" | "DOCTOR"
+export type Gender = "MALE" | "FEMALE"
+
+/**
+ * Picker helper for secretary-facing or secretary-addressing Arabic strings.
+ * Defaults to feminine to preserve existing forms when gender is unspecified.
+ */
+export function tSec(
+  maleStr: string,
+  femaleStr: string,
+  gender?: Gender | string | null,
+): string {
+  return gender === "MALE" ? maleStr : femaleStr
+}
+
+export const secretaryRoleTitle = (gender?: Gender | string | null): string =>
+  tSec("مسؤول الاستقبال", "مسؤولة الاستقبال", gender)
+
+export const secretaryOnlineStatus = (
+  connected: boolean,
+  gender?: Gender | string | null,
+): string =>
+  connected
+    ? tSec("متصل الآن", "متصلة الآن", gender)
+    : tSec("غير متصل — الرسائل تصل عند العودة", "غير متصلة — الرسائل تصل عند العودة", gender)
 
 /* ------------------------------------------------------------------ */
 /* Queue                                                               */
@@ -124,16 +148,24 @@ export const intercomTypeLabel: Record<IntercomType, string> = {
 }
 
 /** Quick templates — mapped to real backend intercom types. */
-export const doctorTemplates = [
-  { label: "اطلبي المريض التالي", type: "DOCTOR_NEXT" as IntercomType },
+export const getDoctorTemplates = (secretaryGender?: Gender | string | null) => [
   {
-    label: "حوّلي الزيارة لاستشارة مجانية",
+    label: tSec("اطلب المريض التالي", "اطلبي المريض التالي", secretaryGender),
+    type: "DOCTOR_NEXT" as IntercomType,
+  },
+  {
+    label: tSec("حوّل الزيارة لاستشارة مجانية", "حوّلي الزيارة لاستشارة مجانية", secretaryGender),
     type: "DOCTOR_COMPLIMENTARY" as IntercomType,
   },
-  { label: "رتبي موعد متابعة", type: "DOCTOR_FOLLOWUP" as IntercomType },
+  {
+    label: tSec("رتّب موعد متابعة", "رتبي موعد متابعة", secretaryGender),
+    type: "DOCTOR_FOLLOWUP" as IntercomType,
+  },
   { label: "السعر النهائي معتمد بدون خصم", type: "CUSTOM_TEXT" as IntercomType },
   { label: "السعر النهائي بعد الخصم: ", type: "CUSTOM_TEXT" as IntercomType },
 ]
+
+export const doctorTemplates = getDoctorTemplates("FEMALE")
 
 export const secretaryTemplates = [
   { label: "يرجى تحديد السعر النهائي بعد أي خصم", type: "CUSTOM_TEXT" as IntercomType },

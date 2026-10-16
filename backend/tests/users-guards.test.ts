@@ -87,10 +87,15 @@ function mockRes(): Response {
   assert.equal(stale.code, 'PASSWORD_CHANGE_REQUIRED');
 }
 
-/** BE-104 (3): create-secretary Zod — all fields required non-blank; password min 8. */
+/** BE-104 (3): create-secretary Zod — all fields required non-blank; password min 8; gender defaults to FEMALE or accepts MALE/FEMALE. */
 {
   assert.equal(createSecretarySchema.safeParse({ name: 'A', identifier: 's1', password: 'longenough1' }).success, true);
-  assert.equal(createSecretarySchema.safeParse({ name: 'سارة محمود أحمد', identifier: 'sara_sec', password: 'longenough1' }).success, true, 'Arabic secretary name accepted');
+  const parsedDefault = createSecretarySchema.parse({ name: 'A', identifier: 's1', password: 'longenough1' });
+  assert.equal(parsedDefault.gender, 'FEMALE');
+  const parsedMale = createSecretarySchema.parse({ name: 'أحمد علي', identifier: 'ahmed_sec', password: 'longenough1', gender: 'MALE' });
+  assert.equal(parsedMale.gender, 'MALE');
+  assert.equal(createSecretarySchema.safeParse({ name: 'سارة محمود أحمد', identifier: 'sara_sec', password: 'longenough1', gender: 'FEMALE' }).success, true, 'Arabic secretary name accepted');
+  assert.equal(createSecretarySchema.safeParse({ name: 'A', identifier: 's1', password: 'longenough1', gender: 'OTHER' }).success, false, 'Invalid gender rejected');
   for (const bad of [
     { name: '   ', identifier: 's1', password: 'longenough1' },
     { name: 'A', identifier: '', password: 'longenough1' },
@@ -107,10 +112,15 @@ function mockRes(): Response {
 
 /** BE-104 (4): DTOs are allowlisted SecretSafe (no passwordHash/tokenVersion keys). */
 {
-  const dto = toManagedUserDto({ id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  const dto = toManagedUserDto({ id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', gender: 'FEMALE', isActive: true });
   assert.equal(isSecretSafe(dto), true);
-  assert.deepEqual({ ...dto }, { id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', isActive: true });
+  assert.deepEqual({ ...dto }, { id: 'u1', name: 'سارة محمود', identifier: 'sec-1', role: 'SECRETARY', gender: 'FEMALE', isActive: true });
   assert.equal(dto.name, 'سارة محمود', 'Arabic name preserved verbatim');
+  assert.equal(dto.gender, 'FEMALE');
+
+  const dtoMale = toManagedUserDto({ id: 'u2', name: 'أحمد علي', identifier: 'sec-2', role: 'SECRETARY', gender: 'MALE', isActive: true });
+  assert.equal(dtoMale.gender, 'MALE');
+
   const act = toActivationDto({ id: 'u1', isActive: false });
   assert.equal(isSecretSafe(act), true);
   assert.deepEqual({ ...act }, { id: 'u1', isActive: false });
@@ -127,15 +137,16 @@ function mockRes(): Response {
  *  (browser reload / cold boot), not just the login envelope. */
 {
   // DTO shape: always-present boolean, allowlisted.
-  const me = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', lastLoginAt: new Date('2026-10-01T00:00:00Z'), passwordMustChange: true });
+  const me = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', gender: 'MALE', lastLoginAt: new Date('2026-10-01T00:00:00Z'), passwordMustChange: true });
   assert.equal(isSecretSafe(me), true);
   assert.deepEqual({ ...me }, {
-    id: 'u1', name: 'Doc', role: 'DOCTOR',
+    id: 'u1', name: 'Doc', role: 'DOCTOR', gender: 'MALE',
     lastLoginAt: '2026-10-01T00:00:00.000Z',
     passwordMustChange: true,
   });
   const meClear = toMeDto({ id: 'u1', name: 'Doc', role: 'DOCTOR', lastLoginAt: null, passwordMustChange: false });
   assert.equal({ ...meClear }.passwordMustChange, false, 'flag is an explicit boolean, not omitted');
+  assert.equal({ ...meClear }.gender, 'FEMALE', 'default gender is FEMALE');
 
   // getMe reads the flag from the DB and includes it in the response.
   const db = {

@@ -11,6 +11,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom"
 import { Icon, type IconName, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
 import { arToday } from "@/lib/format"
+import { secretaryRoleTitle } from "@/lib/constants"
 import { onIntercom } from "@/realtime/socket"
 
 interface NavItem {
@@ -65,9 +66,9 @@ function getInitial(name: string | null | undefined): string {
   return clean.charAt(0) || "س"
 }
 
-function getSafeName(name: string | null | undefined, isDoctor: boolean): string {
+function getSafeName(name: string | null | undefined, isDoctor: boolean, gender?: string): string {
   if (!name || /^\?+$/.test(name.trim())) {
-    return isDoctor ? "د. أحمد سامي" : "سارة محمود"
+    return isDoctor ? "د. أحمد سامي" : (gender === "MALE" ? "أحمد محمود" : "سارة محمود")
   }
   return name.trim()
 }
@@ -78,9 +79,9 @@ export function Sidebar() {
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
   const nav = isDoctor ? doctorNav : secretaryNav
-  const displayName = getSafeName(user?.name, isDoctor)
+  const displayName = getSafeName(user?.name, isDoctor, user?.gender)
   const initial = getInitial(displayName)
-  const roleLabel = isDoctor ? "طبيب/ة نفسية" : "مسؤولة الاستقبال"
+  const roleLabel = isDoctor ? "طبيب/ة نفسية" : secretaryRoleTitle(user?.gender)
 
   return (
     <aside className="sidebar">
@@ -142,7 +143,7 @@ export function Header({ title }: { title: string }) {
   const [query, setQuery] = useState("")
   const navigate = useNavigate()
   const isDoctor = user?.role === "DOCTOR"
-  const displayName = getSafeName(user?.name, isDoctor)
+  const displayName = getSafeName(user?.name, isDoctor, user?.gender)
   const initial = getInitial(displayName)
 
   const searchTarget = useMemo(() => {

@@ -24,15 +24,19 @@ export interface ApiErrorShape {
 
 /* ---------------------------- Auth ---------------------------- */
 
+export type Gender = "MALE" | "FEMALE"
+
 export interface UserDto {
   id: string
   name: string
   role: "DOCTOR" | "SECRETARY"
+  gender?: Gender
 }
 
 export interface MeDto extends UserDto {
   lastLoginAt: string | null
   passwordMustChange: boolean
+  gender?: Gender
 }
 
 export interface LoginResponse {
@@ -64,6 +68,7 @@ export interface UserListItemDto {
   name: string
   identifier: string
   role: "DOCTOR" | "SECRETARY"
+  gender?: Gender
   isActive: boolean
 }
 

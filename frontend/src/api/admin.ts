@@ -35,6 +35,7 @@ export const usersApi = {
     name: string
     identifier: string
     password: string
+    gender?: "MALE" | "FEMALE"
   }): Promise<UserListItemDto> {
     return apiRequest("/users/secretaries", { method: "POST", body: input })
   },

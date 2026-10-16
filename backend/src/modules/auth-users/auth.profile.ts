@@ -13,7 +13,7 @@ export async function getMe(userId: string, db: PrismaClient = prisma): Promise<
     // passwordMustChange is part of the canonical /auth/me contract so the
     // rotation gate survives session restoration (reload/cold boot); the
     // server-side requireFreshPassword enforcement is unaffected either way.
-    select: { id: true, name: true, role: true, lastLoginAt: true, isActive: true, passwordMustChange: true },
+    select: { id: true, name: true, role: true, gender: true, lastLoginAt: true, isActive: true, passwordMustChange: true },
   });
   if (user === null || !user.isActive) throw AppError.unauthorized('Invalid credentials');
   return toMeDto(user);
