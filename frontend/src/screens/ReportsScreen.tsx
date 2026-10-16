@@ -121,7 +121,7 @@ export default function ReportsScreen() {
           ملخص الخزينة
         </button>
         <button className={tab === "shifts" ? "active" : ""} onClick={() => setTab("shifts")}>
-          سجل الورديبات
+          سجل الورديات
         </button>
         <button className={tab === "exceptions" ? "active" : ""} onClick={() => setTab("exceptions")}>
           الاستثناءات
@@ -269,7 +269,7 @@ export default function ReportsScreen() {
         <section className="card archive-card">
           <div className="card-header">
             <div>
-              <span className="section-kicker">سجل الورديبات</span>
+              <span className="section-kicker">سجل الورديات</span>
               <h3>آخر {arNum(closedShifts.length)} وردية مقفلة</h3>
             </div>
           </div>

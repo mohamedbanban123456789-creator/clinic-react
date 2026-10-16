@@ -29,6 +29,10 @@ const EnvSchema = z
     CLINIC_CURRENCY: z.string().min(1).default('USD'),
     CLINIC_SECRETARY_MAX_DISCOUNT_MINOR: z.coerce.number().int().nonnegative().default(5000),
     CLINIC_SECRETARY_MAX_DISCOUNT_PCT: z.coerce.number().int().min(0).max(100).default(10),
+    SHIFT_SYSTEM_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     AUDIO_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
     SEED_DOCTOR_IDENTIFIER: z.string().min(1).default('doctor'),
     SEED_DOCTOR_PASSWORD: z.string().min(8).default('ChangeMe123!'),

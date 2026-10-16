@@ -236,12 +236,12 @@ export default function SecretaryDashboard() {
             {arGreeting()}، {firstName}
           </span>
           <h2>
-            {shiftId ? "العيادة تعمل بهدوء اليوم" : "لم تُفتح الوردية بعد"}
+            العيادة تعمل بهدوء اليوم
           </h2>
           <p>
-            {shiftId
+            {stats.waiting.length > 0
               ? `لديك ${arNum(stats.waiting.length)} مرضى في الانتظار، ومتوسط وقت الكشف ${arNum(avgMin)} دقيقة.`
-              : "افتح الوردية من شاشة الإغلاق اليومي لبدء تسجيل الحضور والتحصيل."}
+              : "لا مرضى في الانتظار حاليًا. يمكنك تسجيل الحضور أو إضافة مريض جديد."}
           </p>
         </div>
         <div className="quick-actions">
@@ -262,7 +262,7 @@ export default function SecretaryDashboard() {
         <StatCard
           label="زيارات اليوم"
           value={arNum(stats.total)}
-          hint={shiftId ? "إجمالي سجلات الطابور اليوم" : "ستظهر بعد فتح الوردية"}
+          hint="إجمالي سجلات الطابور اليوم"
           icon="users"
           tone="violet"
         />
@@ -295,7 +295,7 @@ export default function SecretaryDashboard() {
           label="إيراد اليوم"
           value={arNum(stats.collected / 100)}
           suffix="ج.م."
-          hint="محصّل من فواتير الوردية الحالية"
+          hint="محصّل من فواتير اليوم"
           icon="wallet"
           tone="coral"
         />
@@ -334,9 +334,7 @@ export default function SecretaryDashboard() {
             )}
             {!isLoading && !isError && entries.length === 0 && (
               <div className="queue-row">
-                <span>
-                  {shiftId ? "لا مرضى في الطابور بعد — سجّل أول حضور." : "افتح الوردية لبدء الطابور."}
-                </span>
+                <span>لا مرضى في الطابور بعد — سجّل أول حضور.</span>
               </div>
             )}
             {displayEntries.map((patient, index) => {

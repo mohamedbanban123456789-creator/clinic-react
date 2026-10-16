@@ -299,7 +299,7 @@ export default function DoctorDashboard() {
           <p>
             {current
               ? `${current.patientId.slice(-6)} · ${
-                  current.isEmergency ? "حالة طارئة" : "زيارة في الوردية"
+                  current.isEmergency ? "حالة طارئة" : "زيارة اليوم"
                 } · ${arTimer(elapsed)} منذ الاستدعاء`
               : "اضغط استدعاء التالي لبدء جلسة جديدة مع أول مريض في الطابور."}
           </p>
@@ -361,7 +361,7 @@ export default function DoctorDashboard() {
         <StatCard
           label="زيارات مكتملة"
           value={arNum(completed.length)}
-          hint={`من أصل ${arNum(entries.length)} في الوردية`}
+          hint={`من أصل ${arNum(entries.length)} اليوم`}
           icon="check"
           tone="mint"
         />
@@ -412,7 +412,7 @@ export default function DoctorDashboard() {
                 <strong>{p.displayName}</strong>
                 <small>
                   {p.patientId.slice(-6)} ·{" "}
-                  {p.isEmergency ? "حالة طارئة" : "زيارة في الوردية"}
+                  {p.isEmergency ? "حالة طارئة" : "زيارة اليوم"}
                 </small>
               </div>
               {p.isEmergency && (

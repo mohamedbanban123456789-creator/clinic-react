@@ -255,23 +255,6 @@ export default function PaymentsScreen() {
     [openInvoicesQuery.invoices],
   )
 
-  if (!shiftId) {
-    return (
-      <section className="card form-card">
-        <div className="step-header">
-          <span className="step-no">!</span>
-          <div>
-            <h2>لا توجد وردية مفتوحة</h2>
-            <p>يتعذر التحصيل قبل فتح الوردية — افتحها من شاشة الإغلاق اليومي.</p>
-          </div>
-        </div>
-        <AppButton icon="chart" onClick={() => navigate("/secretary/closing")}>
-          الانتقال إلى الإغلاق اليومي
-        </AppButton>
-      </section>
-    )
-  }
-
   return (
     <div className="payment-layout">
       <section className="card billing-form">
@@ -298,7 +281,7 @@ export default function PaymentsScreen() {
           <div className="form-section">
             <h3>زيارات بانتظار التحصيل</h3>
             {selectableInvoices.length === 0 && (
-              <p>لا توجد فواتير غير مدفوعة في هذه الوردية.</p>
+              <p>لا توجد فواتير غير مدفوعة اليوم.</p>
             )}
             <div className="data-table">
               {selectableInvoices.map((inv) => (
@@ -340,7 +323,7 @@ export default function PaymentsScreen() {
                 <label className="field">
                   <span>نوع الزيارة</span>
                   <select defaultValue="visit">
-                    <option value="visit">زيارة في الوردية الحالية</option>
+                    <option value="visit">زيارة اليوم</option>
                   </select>
                 </label>
                 <label className="field money-field">

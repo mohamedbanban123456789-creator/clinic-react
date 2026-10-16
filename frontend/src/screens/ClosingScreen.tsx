@@ -55,7 +55,7 @@ function AddPettyModal({
   return (
     <Modal
       title="إضافة مصروف / إيداع نثري"
-      subtitle="يُسجل البند في سجل الوردية الحالية."
+      subtitle="يُسجل البند في سجل اليوم."
       onClose={onClose}
     >
       <form
@@ -154,9 +154,6 @@ export default function ClosingScreen() {
     enabled: isDoctor,
   })
 
-  const current = shiftQuery.data
-  const isOpen = current?.status === "OPEN"
-
   // Doctor post-close view: latest CLOSED shift (from the supervision feed)
   // when no live shift exists — enables review/ack on a fresh page load.
   const latestClosed = isDoctor
@@ -164,6 +161,9 @@ export default function ClosingScreen() {
         (s) => s.status === "CLOSED" && s.reviewedAt === null,
       ) ?? (closedShiftsQuery.data?.data ?? []).find((s) => s.status === "CLOSED")
     : undefined
+
+  const current = shiftQuery.data
+  const isOpen = current ? current.status === "OPEN" : !closeResult && !latestClosed
 
   // Report shiftId: live shift, or the just-closed one (after close,
   // GET /shifts/current 404s — "No open shift").
@@ -193,9 +193,21 @@ export default function ClosingScreen() {
   const openMutation = useMutation({
     mutationFn: () => shiftsApi.open(Math.round(actual * 100)),
     onSuccess: (shift) => {
-      notify(`فُتحت وردية ${arDate(shift.businessDate)} — الطابور جاهز`)
+      notify(`تم فتح اليوم ${arDate(shift.businessDate)} — الطابور جاهز`)
       setActual(0)
       void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+      void queryClient.invalidateQueries({ queryKey: ["queue"] })
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const reopenMutation = useMutation({
+    mutationFn: () => shiftsApi.reopen(reportShiftId),
+    onSuccess: () => {
+      setCloseResult(null)
+      notify("تمت إعادة فتح اليوم بنجاح")
+      void queryClient.invalidateQueries({ queryKey: ["shifts"] })
+      void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["queue"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
@@ -205,7 +217,7 @@ export default function ClosingScreen() {
     mutationFn: () => {
       const reason = closeReason.trim()
       const hasWaiting = waitingPatients.length > 0
-      return shiftsApi.close(reportShiftId!, Math.round(actual * 100), {
+      return shiftsApi.close(reportShiftId || "current", Math.round(actual * 100), {
         force: hasWaiting || reason.length > 0,
         ...(reason ? { forceReason: reason, reason } : {}),
       })
@@ -227,7 +239,7 @@ export default function ClosingScreen() {
   const ackMutation = useMutation({
     mutationFn: (note: string) => supervisionApi.ackShift(reportShiftId!, note || undefined),
     onSuccess: () => {
-      notify("تم اعتماد مراجعة الوردية")
+      notify("تم اعتماد مراجعة اليوم")
       void queryClient.invalidateQueries({ queryKey: ["shifts"] })
     },
     onError: (err) => notify(apiErrorMessage(err), "error"),
@@ -284,38 +296,6 @@ export default function ClosingScreen() {
   const cashPct = gross > 0 ? (cashPart / gross) * 100 : 0
   const otherPct = gross > 0 ? (otherPart / gross) * 100 : 0
 
-  /* --------------------------- No shift --------------------------- */
-
-  if (!current && !closeResult && !latestClosed) {
-    return (
-      <section className="card form-card">
-        <div className="step-header">
-          <span className="step-no">١</span>
-          <div>
-            <h2>فتح وردية جديدة</h2>
-            <p>أدخل العد النقدي الفعلي في الدرج لبدء يوم العمل (عد أعمى لضمان الدقة).</p>
-          </div>
-        </div>
-        <label className="field money-field">
-          <span>النقد الفعلي في الدرج الآن</span>
-          <input
-            type="number"
-            value={actual || ""}
-            onChange={(e) => setActual(Number(e.target.value))}
-          />
-          <i>ج.م.</i>
-        </label>
-        <AppButton
-          icon="lock"
-          onClick={() => openMutation.mutate()}
-          disabled={openMutation.isPending || actual < 0}
-        >
-          {openMutation.isPending ? "جارٍ الفتح..." : "فتح الوردية"}
-        </AppButton>
-      </section>
-    )
-  }
-
   /* ----------------------------- View ----------------------------- */
 
   return (
@@ -343,9 +323,9 @@ export default function ClosingScreen() {
 
       <section className="stats-grid four">
         <StatCard
-          label="زيارات الوردية"
+          label="زيارات اليوم"
           value={arNum(summaryQuery.data?.totalServed ?? aggregates.served)}
-          hint={isOpen ? "فواتير الوردية الحالية" : "إجمالي مرضى الوردية"}
+          hint={isOpen ? "فواتير اليوم الحالية" : "إجمالي مرضى اليوم"}
           icon="users"
           tone="violet"
         />
@@ -430,7 +410,7 @@ export default function ClosingScreen() {
               <p>
                 {isOpen
                   ? "قارن النقد الفعلي بالمبلغ المسجل — يُكشف المتوقع عند الإغلاق (عد أعمى)."
-                  : "نتيجة المطابقة النهائية للوردية."}
+                  : "نتيجة المطابقة النهائية لليوم."}
               </p>
             </div>
             <span
@@ -515,10 +495,22 @@ export default function ClosingScreen() {
               مراجعة واعتماد الإغلاق
             </AppButton>
           )}
-          {!isOpen && isDoctor && reportShift && reportShift.result !== null && reportShift.reviewedAt === null && (
-            <AppButton icon="check" onClick={() => ackMutation.mutate("تمت المراجعة")}>
-              اعتماد مراجعة الوردية (طبيب)
-            </AppButton>
+          {!isOpen && (
+            <div style={{ display: "flex", gap: "0.75rem", marginTop: "1rem", flexWrap: "wrap" }}>
+              <AppButton
+                variant="secondary"
+                icon="arrow"
+                onClick={() => reopenMutation.mutate()}
+                disabled={reopenMutation.isPending}
+              >
+                {reopenMutation.isPending ? "جارٍ إعادة الفتح..." : "إعادة فتح اليوم"}
+              </AppButton>
+              {isDoctor && reportShift && reportShift.result !== null && reportShift.reviewedAt === null && (
+                <AppButton icon="check" onClick={() => ackMutation.mutate("تمت المراجعة")}>
+                  اعتماد مراجعة اليوم (طبيب)
+                </AppButton>
+              )}
+            </div>
           )}
         </section>
       </div>
@@ -529,12 +521,12 @@ export default function ClosingScreen() {
             <h3>توزيع الإيراد حسب طريقة الدفع</h3>
             <p>
               {isOpen
-                ? "تقديري من فواتير الوردية الجارية."
-                : "إجمالي محصل الوردية (مسجل)."}
+                ? "تقديري من فواتير اليوم الجارية."
+                : "إجمالي محصل اليوم (مسجل)."}
             </p>
           </div>
-          <select defaultValue="today" disabled title="يعرض الوردية الحالية/الأخيرة">
-            <option value="today">هذه الوردية</option>
+          <select defaultValue="today" disabled title="يعرض تعاملات اليوم">
+            <option value="today">اليوم الحالي</option>
           </select>
         </div>
         <div className="chart-body">

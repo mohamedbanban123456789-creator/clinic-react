@@ -12,6 +12,7 @@ import {
   getShiftSummary,
   listPetty,
   openShift,
+  reopenShift,
 } from './shift.service.js';
 import {
   pettyCreateSchema,
@@ -57,6 +58,18 @@ shiftsRouter.post(
     const auth = requireAuth(req);
     openShift(req.body as ShiftOpenInput, { userId: auth.userId, role: auth.role }, readIdempotencyKey(req))
       .then((dto) => res.status(201).json(dto))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/shifts/reopen  [BOTH]  -> 200 SecretSafe<ShiftViewDto>
+shiftsRouter.post(
+  '/reopen',
+  requireRole('DOCTOR', 'SECRETARY'),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    reopenShift((req.body as { shiftId?: string })?.shiftId, { userId: auth.userId, role: auth.role })
+      .then((dto) => res.status(200).json(dto))
       .catch(next);
   },
 );

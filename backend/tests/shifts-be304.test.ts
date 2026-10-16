@@ -21,7 +21,8 @@ import {
   shiftCloseSchema,
   shiftOpenSchema,
 } from '../src/modules/cashier-shift/shift.validators.js';
-import { closeShift } from '../src/modules/cashier-shift/shift.service.js';
+import { closeShift, reopenShift } from '../src/modules/cashier-shift/shift.service.js';
+import { ensureAutoShift } from '../src/modules/cashier-shift/shift.support.js';
 
 // BE-304/305/306 acceptance: new AppError codes carry the contract status.
 {
@@ -396,4 +397,77 @@ import { closeShift } from '../src/modules/cashier-shift/shift.service.js';
   assert.equal((closeAudit.afterState as Record<string, unknown>).closedWithOpenEntries, true);
   assert.equal((closeAudit.afterState as Record<string, unknown>).openEntriesCount, 2);
 }
+
+// ---------------------------------------------------------------------------
+// P1-7: Shift system simplification: silent auto-open and day reopen
+// ---------------------------------------------------------------------------
+{
+  let shiftRow: any = null;
+  const auditList: any[] = [];
+
+  const mockDb: any = {
+    shift: {
+      findFirst: async (args: any) => {
+        if (args?.where?.status === 'OPEN') {
+          return shiftRow && shiftRow.status === 'OPEN' ? shiftRow : null;
+        }
+        return shiftRow;
+      },
+      findUnique: async () => shiftRow,
+      create: async (args: any) => {
+        shiftRow = {
+          id: 'shift-auto-1',
+          businessDate: args.data.businessDate,
+          status: 'OPEN',
+          openingFloatMinor: args.data.openingFloatMinor,
+          openingCarryForwardMinor: args.data.openingCarryForwardMinor,
+          openingDiscrepancyMinor: args.data.openingDiscrepancyMinor,
+          queueVersion: 0,
+          openedByUserId: args.data.openedByUserId,
+          createdAt: new Date(),
+        };
+        return shiftRow;
+      },
+      update: async (args: any) => {
+        Object.assign(shiftRow, args.data);
+        return shiftRow;
+      },
+    },
+    user: {
+      findFirst: async () => ({ id: 'u-auto-sec' }),
+    },
+    auditEvent: {
+      create: async (args: any) => {
+        auditList.push(args.data);
+        return args.data;
+      },
+    },
+  };
+
+  // 1. When no open shift exists, ensureAutoShift creates backing shift silently
+  const autoShift = await ensureAutoShift(mockDb, 'u-auto-sec');
+  assert.equal(autoShift.id, 'shift-auto-1');
+  assert.equal(autoShift.status, 'OPEN');
+  assert.equal(shiftRow.status, 'OPEN');
+
+  // 2. Close the shift
+  shiftRow.status = 'CLOSED';
+  shiftRow.closedAt = new Date();
+  shiftRow.closedByUserId = 'u-auto-sec';
+
+  // 3. Reopen the shift freely
+  const reopenResult = await reopenShift('shift-auto-1', { userId: 'u-auto-sec', role: 'SECRETARY' }, mockDb);
+  assert.equal(reopenResult.shiftId, 'shift-auto-1');
+  assert.equal(reopenResult.status, 'OPEN');
+  assert.equal(shiftRow.status, 'OPEN');
+  assert.equal(shiftRow.closedAt, null);
+
+  const reopenAudit = auditList.find((a) => a.action === 'SHIFT_OPEN' && a.entityId === 'shift-auto-1');
+  assert.ok(reopenAudit, 'SHIFT_OPEN audit recorded on reopen');
+  assert.equal(reopenAudit.reasonText, 'إعادة فتح اليوم');
+}
+
+// eslint-disable-next-line no-console
+console.log('shifts-be304: shift lifecycle + closing + P1-7 auto-shift/reopen tests passed.');
+
 

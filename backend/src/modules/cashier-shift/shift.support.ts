@@ -199,3 +199,87 @@ export interface ShiftRowFull {
   readonly reviewedAt: Date | null;
   readonly reviewNote: string | null;
 }
+
+/**
+ * Automatically creates or reopens a backing shift for today when SHIFT_SYSTEM_ENABLED=false.
+ * Allows the secretary and doctor to work seamlessly without manual shift opening ceremony.
+ */
+export async function ensureAutoShift(
+  db: PrismaTx | PrismaClient,
+  actorUserId?: string,
+): Promise<{ id: string; queueVersion: number; status: string }> {
+  // Check if there is already an OPEN shift
+  const openShift = await db.shift.findFirst({
+    where: { status: 'OPEN' },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (openShift !== null) {
+    return { id: openShift.id, queueVersion: openShift.queueVersion, status: openShift.status };
+  }
+
+  const businessDate = toBusinessDate(new Date());
+
+  // Check if today's shift was already created and closed
+  const existingToday = await db.shift.findUnique({
+    where: { businessDate },
+  });
+
+  if (existingToday !== null) {
+    // Reopen today's shift freely (P1-7: "The secretary can close the day and reopen freely; the next day starts fresh")
+    const reopened = await db.shift.update({
+      where: { id: existingToday.id },
+      data: {
+        status: 'OPEN',
+        closedAt: null,
+        closedByUserId: null,
+        closeIdempotencyKey: null,
+      },
+    });
+    return { id: reopened.id, queueVersion: reopened.queueVersion, status: reopened.status };
+  }
+
+  // Find a valid user id for openedByUserId if not passed
+  let userId = actorUserId;
+  if (!userId && typeof (db as PrismaClient).user?.findFirst === 'function') {
+    const user = await (db as PrismaClient).user.findFirst({
+      where: { isActive: true },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    userId = user?.id;
+  }
+  if (!userId) {
+    userId = 'system-auto-shift';
+  }
+
+  const carry = await deriveOpeningCarryForward(db, businessDate);
+
+  try {
+    const created = await db.shift.create({
+      data: {
+        businessDate,
+        status: 'OPEN',
+        openingFloatMinor: carry.carryForwardMinor,
+        openingCarryForwardMinor: carry.carryForwardMinor,
+        openingDiscrepancyMinor: 0,
+        queueVersion: 0,
+        openedByUserId: userId,
+      },
+      select: { id: true, queueVersion: true, status: true },
+    });
+
+    return created;
+  } catch (err) {
+    if (isUniqueViolation(err, 'business_date') || isUniqueViolation(err, 'uq_shifts_single_open') || isUniqueViolation(err, 'status')) {
+      const fallback = await db.shift.findFirst({
+        where: { status: 'OPEN' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (fallback !== null) {
+        return { id: fallback.id, queueVersion: fallback.queueVersion, status: fallback.status };
+      }
+    }
+    throw err;
+  }
+}
+

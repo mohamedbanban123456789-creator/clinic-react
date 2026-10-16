@@ -82,4 +82,11 @@ export const shiftsApi = {
       idempotency: true,
     })
   },
+
+  reopen(shiftId?: string): Promise<ShiftViewDto> {
+    return apiRequest("/shifts/reopen", {
+      method: "POST",
+      body: { shiftId },
+    })
+  },
 }

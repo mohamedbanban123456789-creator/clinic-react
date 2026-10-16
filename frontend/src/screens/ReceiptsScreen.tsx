@@ -249,7 +249,7 @@ export default function ReceiptsScreen() {
           <p>
             {isDoctor
               ? "ابحث واستعرض تفاصيل كل عملية تحصيل."
-              : "ابحث باسم المريض لعرض سجل إيصالاته (تظهر إيصالات الورديبات المقفلة)."}
+              : "ابحث باسم المريض لعرض سجل إيصالاته."}
           </p>
         </div>
       </div>
@@ -352,7 +352,7 @@ export default function ReceiptsScreen() {
           !receiptsQuery.isError &&
           filtered.length === 0 && (
             <div className="data-row">
-              <span>لا توجد إيصالات بعد — تُعرض إيصالات الوردية بعد إغلاقها.</span>
+              <span>لا توجد إيصالات بعد — تُعرض الإيصالات بعد تسجيلها.</span>
             </div>
           )}
         {filtered.map((r, i) => (

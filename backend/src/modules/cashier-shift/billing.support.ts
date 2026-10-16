@@ -23,12 +23,19 @@ export async function lockPatient(tx: PrismaTx, patientId: string): Promise<void
   await tx.$queryRaw`SELECT id FROM patients WHERE id = ${patientId} FOR UPDATE`;
 }
 
+import { ensureAutoShift } from './shift.support.js';
+
 /** Load the OPEN shift or throw 409 NO_OPEN_SHIFT. */
 export async function getOpenShiftOrThrow(
   db: PrismaTx | PrismaClient,
 ): Promise<{ id: string; queueVersion: number }> {
   const shift = await db.shift.findFirst({ where: { status: 'OPEN' }, select: { id: true, queueVersion: true } });
   if (shift === null) {
+    const env = loadEnv();
+    if (!env.SHIFT_SYSTEM_ENABLED) {
+      const auto = await ensureAutoShift(db);
+      return { id: auto.id, queueVersion: auto.queueVersion };
+    }
     throw new AppError('NO_OPEN_SHIFT', 'No open shift');
   }
   return { id: shift.id, queueVersion: shift.queueVersion };
