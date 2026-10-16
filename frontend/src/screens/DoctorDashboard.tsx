@@ -13,11 +13,13 @@ import { useQueue, useQueueInvalidation } from "@/hooks/useQueue"
 import { queueApi } from "@/api/queue"
 import { supervisionApi, settingsApi } from "@/api/admin"
 import { billingApi } from "@/api/billing"
+import { patientsApi } from "@/api/patients"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
 import { FloatingChat } from "@/components/Conversation"
-import { arNum, arTimer, arDate } from "@/lib/format"
-import type { UnsignedNotesDto } from "@/api/types"
+import { arNum, arTimer, arDate, ageFromDob, arAgo, moneyMinor } from "@/lib/format"
+import { emergencyReasonLabel } from "@/lib/constants"
+import type { UnsignedNotesDto, QueueEntryDto } from "@/api/types"
 
 function ReviewModal({
   data,
@@ -237,6 +239,19 @@ export default function DoctorDashboard() {
     return () => window.clearInterval(timer)
   }, [current?.calledAt])
 
+  const [pendingCallPatient, setPendingCallPatient] = useState<QueueEntryDto | null>(null)
+
+  const pendingPatientDetailQuery = useQuery({
+    queryKey: ["patients", pendingCallPatient?.patientId],
+    queryFn: () => patientsApi.get(pendingCallPatient!.patientId),
+    enabled: !!pendingCallPatient?.patientId,
+  })
+
+  const handleOpenCallReview = () => {
+    if (waiting.length === 0) return
+    setPendingCallPatient(waiting[0])
+  }
+
   const callNextMutation = useMutation({
     mutationFn: () => queueApi.callNext(),
     onSuccess: (entry) => {
@@ -330,7 +345,11 @@ export default function DoctorDashboard() {
                 </AppButton>
               </>
             ) : (
-              <AppButton icon="phone" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || waiting.length === 0}>
+              <AppButton
+                icon="phone"
+                onClick={handleOpenCallReview}
+                disabled={callNextMutation.isPending || waiting.length === 0}
+              >
                 {callNextMutation.isPending ? "جارٍ الاستدعاء..." : "استدعاء المريض التالي"}
               </AppButton>
             )}
@@ -393,7 +412,11 @@ export default function DoctorDashboard() {
               <span className="section-kicker">قائمة الانتظار</span>
               <h3>المرضى القادمون</h3>
             </div>
-            <AppButton icon="phone" onClick={() => callNextMutation.mutate()} disabled={callNextMutation.isPending || waiting.length === 0}>
+            <AppButton
+              icon="phone"
+              onClick={handleOpenCallReview}
+              disabled={callNextMutation.isPending || waiting.length === 0}
+            >
               استدعاء التالي
             </AppButton>
           </div>
@@ -503,6 +526,180 @@ export default function DoctorDashboard() {
             <AppButton variant="outline" onClick={() => setShowComplimentary(false)}>
               إلغاء
             </AppButton>
+          </div>
+        </Modal>
+      )}
+
+      {pendingCallPatient && (
+        <Modal
+          title="مراجعة بيانات المريض قبل الاستدعاء"
+          subtitle="خطوة مراجعة إلزامية للتحقق من المريض القادم قبل دخول الجلسة."
+          onClose={() => setPendingCallPatient(null)}
+        >
+          <div className="review-patient-panel" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div
+              style={{
+                background: "var(--color-primary-soft, #EEEBFF)",
+                padding: "16px",
+                borderRadius: "12px",
+                border: "1px solid var(--color-border, #E1E4F0)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "12px",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "12px", color: "var(--color-text-secondary, #55566F)" }}>
+                    المريض التالي في الطابور
+                  </span>
+                  <h3
+                    style={{
+                      margin: "2px 0 0",
+                      color: "var(--color-text-primary, #29264F)",
+                      fontSize: "18px",
+                    }}
+                  >
+                    {pendingCallPatient.displayName}
+                  </h3>
+                </div>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    background: "#FFF",
+                    padding: "4px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--color-border, #E1E4F0)",
+                  }}
+                >
+                  معرّف: {pendingCallPatient.patientId.slice(-6)}
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <div>
+                  <small style={{ color: "var(--color-text-muted, #686982)", display: "block" }}>
+                    العمر
+                  </small>
+                  <strong style={{ fontSize: "15px" }}>
+                    {pendingPatientDetailQuery.isLoading
+                      ? "جارٍ التحميل..."
+                      : pendingPatientDetailQuery.data?.dateOfBirth
+                        ? `${arNum(ageFromDob(pendingPatientDetailQuery.data.dateOfBirth) ?? 0)} سنة`
+                        : "غير مسجل"}
+                  </strong>
+                </div>
+                <div>
+                  <small style={{ color: "var(--color-text-muted, #686982)", display: "block" }}>
+                    آخر زيارة
+                  </small>
+                  <strong style={{ fontSize: "15px" }}>
+                    {pendingPatientDetailQuery.isLoading
+                      ? "جارٍ التحميل..."
+                      : pendingPatientDetailQuery.data?.pastVisitTimestamps?.[0]
+                        ? arAgo(pendingPatientDetailQuery.data.pastVisitTimestamps[0])
+                        : "زيارة أولى (لا زيارات سابقة)"}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--color-text-primary, #29264F)",
+                }}
+              >
+                تنبيهات المريض:
+              </span>
+
+              {pendingCallPatient.isEmergency && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: "rgba(180, 35, 54, 0.1)",
+                    color: "#B42336",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  <Icon name="alert" size={16} />
+                  <span>
+                    <strong>حالة طارئة:</strong>{" "}
+                    {emergencyReasonLabel[pendingCallPatient.emergencyReasonCode ?? ""] ||
+                      "تم تصنيف الحالة كأولوية قصوى"}
+                  </span>
+                </div>
+              )}
+
+              {pendingCallPatient.debtAlert && pendingCallPatient.debtAlert.outstandingMinor > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    background: "rgba(180, 83, 9, 0.1)",
+                    color: "#B45309",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  <Icon name="wallet" size={16} />
+                  <span>
+                    <strong>رصيد مستحق غير مسدد:</strong>{" "}
+                    {moneyMinor(pendingCallPatient.debtAlert.outstandingMinor)}
+                  </span>
+                </div>
+              )}
+
+              {!pendingCallPatient.isEmergency &&
+                (!pendingCallPatient.debtAlert ||
+                  pendingCallPatient.debtAlert.outstandingMinor <= 0) && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: "rgba(8, 127, 140, 0.1)",
+                      color: "#087F8C",
+                      padding: "10px 14px",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <Icon name="check" size={16} />
+                    <span>لا توجد تنبيهات طارئة أو ديون مستحقة على المريض.</span>
+                  </div>
+                )}
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: "8px" }}>
+              <AppButton variant="outline" type="button" onClick={() => setPendingCallPatient(null)}>
+                إلغاء
+              </AppButton>
+              <AppButton
+                icon="phone"
+                onClick={() => {
+                  setPendingCallPatient(null)
+                  callNextMutation.mutate()
+                }}
+                disabled={callNextMutation.isPending}
+              >
+                {callNextMutation.isPending ? "جارٍ الاستدعاء..." : "استدعاء المريض الآن"}
+              </AppButton>
+            </div>
           </div>
         </Modal>
       )}
