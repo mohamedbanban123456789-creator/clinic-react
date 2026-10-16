@@ -1,0 +1,5 @@
+{
+  "appUrl": "postgresql://clinic_app:app-d1bceb3b8a029f706f402f32@127.0.0.1:46735/clinic_e2e",
+  "ownerUrl": "postgresql://clinic_migrate:mig-ce32e69eaa15dcf5510c477a@127.0.0.1:46735/clinic_e2e",
+  "port": 4000
+}

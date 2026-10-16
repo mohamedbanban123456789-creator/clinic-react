@@ -1,0 +1,12 @@
+{
+  "description": "Manage psychiatric clinic operations with role-specific tools for patient check-ins, queue management, clinical documentation, payments, and secure staff communication.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  },
+  "title": "سكينة — لإدارة العيادات النفسية",
+  "language": "ar"
+}

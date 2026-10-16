@@ -1,0 +1,761 @@
+// RPS-2 Lean Edition — Single Prisma schema (PostgreSQL-targeted logical model)
+// DB-01: single client via src/common/prisma.ts, single schema file (C-2).
+// DB-02: ALL operational -> clinical Prisma relations SEVERED (C-3).
+// Canon SQL (Appendix A, exactly 3 statements) lives in migration canon.sql.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  DOCTOR
+  SECRETARY
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum QueueStatus {
+  WAITING
+  IN_CONSULTATION
+  COMPLETED
+  SKIPPED
+  NO_SHOW
+  ABANDONED
+}
+
+enum CallRequestStatus {
+  PENDING
+  APPROVED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  COMPLIMENTARY
+  WRITTEN_OFF
+}
+
+enum ReceiptType {
+  CHARGE
+  REVERSAL
+}
+
+// BE-304 petty cash direction. EXPENSE pays operational cash OUT of the drawer
+// (reduces expected cash); INJECTION tops the drawer UP (increases expected cash).
+// INV-7: petty rows reference an OPEN shift only, created inside lockShift.
+enum PettyDirection {
+  EXPENSE
+  INJECTION
+}
+
+enum PaymentMethod {
+  CASH
+  OTHER
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum ShiftResult {
+  BALANCED
+  SURPLUS
+  DEFICIT
+}
+
+enum IntercomType {
+  DOCTOR_COMPLIMENTARY
+  DOCTOR_NEXT
+  DOCTOR_FOLLOWUP
+  SEC_DISRUPTION
+  SEC_PHARMACY_LAB
+  SEC_CORRECTION_REQUEST
+  CUSTOM_TEXT
+}
+
+enum EncounterSource {
+  MANUAL
+  SCRIBE
+}
+
+enum EncounterStatus {
+  DRAFT
+  SIGNED
+  DISCARDED
+}
+
+enum MedicationStatus {
+  ACTIVE
+  DISCONTINUED
+}
+
+enum ScribeMode {
+  AMBIENT_LIVE
+  DICTATION_60S
+}
+
+enum ConsentStatus {
+  GRANTED
+  WITHDRAWN
+}
+
+enum ScribeSessionStatus {
+  UPLOADED
+  TRANSCRIBING
+  TRANSCRIBED
+  COMMITTED
+  FAILED
+  WITHDRAWN
+  PURGED
+}
+
+enum ScribeDraftStatus {
+  DRAFT
+  EDITED
+  SIGNED
+  SUPERSEDED
+}
+
+enum RegistrationStatus {
+  COMPLETE
+  INCOMPLETE
+}
+
+enum AuditAction {
+  LOGIN
+  LOGIN_LOCKOUT
+  LOGOUT
+  REFRESH
+  USER_CREATE
+  USER_UPDATE
+  USER_DEACTIVATE
+  USER_ACTIVATE
+  PASSWORD_CHANGE
+  PATIENT_CREATE
+  PATIENT_UPDATE
+  PATIENT_SEARCH
+  PATIENT_FLAGGED_DUPLICATE
+  QUEUE_CHECKIN
+  QUEUE_CALL
+  CALL_REQUEST_CREATE
+  CALL_REQUEST_APPROVE
+  CALL_REQUEST_CANCEL
+  QUEUE_SKIP
+  QUEUE_REQUEUE
+  QUEUE_COMPLETE
+  QUEUE_UNDO_COMPLETE
+  QUEUE_COMPLETE_UNDO
+  QUEUE_OUT_OF_ORDER_CALL
+  QUEUE_NO_SHOW
+  QUEUE_ABANDON
+  FORCED_CALLNEXT
+  CHECKIN_DEBT_ACK
+  QUEUE_REORDER
+  EMERGENCY_FLAG
+  EMERGENCY_UNFLAG
+  CHECKOUT
+  INVOICE_PAY
+  INVOICE_WRITE_OFF
+  COMPLIMENTARY
+  WRITE_OFF
+  REVERSAL
+  PETTY_CREATE
+  SHIFT_OPEN
+  SHIFT_CLOSE
+  INTERCOM_SEND
+  FOLLOWUP_CREATE
+  FOLLOWUP_UPDATE
+  ENCOUNTER_CREATE
+  ENCOUNTER_UPDATE
+  ENCOUNTER_SIGN
+  ENCOUNTER_DISCARD
+  ENCOUNTER_ADDENDUM
+  ENCOUNTER_AI_DIAGNOSIS
+  CHART_READ
+  MEDICATION_CREATE
+  MEDICATION_DISCONTINUE
+  MEDICATION_ADJUST
+  VAULT_ACCESS
+  SCRIBE_UPLOAD
+  SCRIBE_TRANSCRIBE
+  CONSENT_WITHDRAWN
+  AUDIO_PURGED
+  IDEMPOTENT_REPLAY
+  FLOOR_VIOLATION
+  DISCREPANCY_FLAG
+  DISCOUNT_FLOOR_BLOCKED
+  RECEIPT_REVERSAL
+  SHIFT_ACK
+  INTEGRITY_CHECK_FAILED
+}
+
+model User {
+  id                   String    @id @default(cuid())
+  name                 String
+  identifier           String    @unique
+  passwordHash         String    @map("password_hash")
+  role                 Role      @default(SECRETARY)
+  gender               Gender    @default(FEMALE)
+  isActive             Boolean   @default(true) @map("is_active")
+  createdByUserId      String?   @map("created_by_user_id")
+  lastLoginAt          DateTime? @map("last_login_at")
+  tokenVersion         Int       @default(0) @map("token_version")
+  passwordMustChange   Boolean   @default(false) @map("password_must_change")
+  lastPasswordChangeAt DateTime? @map("last_password_change_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  createdBy             User?                @relation("UserCreated", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdUsers          User[]               @relation("UserCreated")
+  patientsCreated       Patient[]            @relation("PatientCreated")
+  refreshFamilies       RefreshTokenFamily[]
+  shiftsOpened          Shift[]              @relation("ShiftOpened")
+  shiftsClosed          Shift[]              @relation("ShiftClosed")
+  invoicesCreated       Invoice[]            @relation("InvoiceCreated")
+  complimentaryAuth     Invoice[]            @relation("ComplimentaryAuth")
+  receiptsActed         Receipt[]            @relation("ReceiptActor")
+  pettyCreated          PettyExpense[]       @relation("PettyActor")
+  intercomSent          IntercomMessage[]    @relation("IntercomSender")
+  followupsRequested    FollowUpTask[]       @relation("FollowupRequester")
+  encountersSigned      Encounter[]          @relation("EncounterSigner")
+  encounterAddenda      EncounterAddendum[]  @relation("AddendumAuthor")
+  medicationsPrescribed Medication[]         @relation("MedicationPrescriber")
+  vaultNotesCreated     TherapyNote[]        @relation("VaultCreator")
+  scribeCreated         ScribeSession[]      @relation("ScribeCreator")
+  auditEvents           AuditEvent[]         @relation("AuditActor")
+  callRequestsRequested CallRequest[]        @relation("CallRequester")
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+model RefreshTokenFamily {
+  id            String   @id @default(cuid())
+  familyId      String   @map("family_id")
+  tokenId       String   @unique @map("token_id")
+  userId        String   @map("user_id")
+  tokenHash     String   @map("token_hash")
+  issuedAt      DateTime @default(now()) @map("issued_at")
+  expiresAt     DateTime @map("expires_at")
+  rotatedFromId String?  @map("rotated_from_id")
+  isRevoked     Boolean  @default(false) @map("is_revoked")
+  reuseDetected Boolean  @default(false) @map("reuse_detected")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, isRevoked])
+  @@index([expiresAt])
+  @@index([familyId])
+  @@map("refresh_token_families")
+}
+
+model ClinicSettings {
+  id                        String   @id @default("singleton")
+  standardFeeMinor          Int      @map("standard_fee_minor")
+  currency                  String
+  avgConsultDurationMin     Int      @map("avg_consult_duration_min")
+  openingFloatMinor         Int      @default(0) @map("opening_float_minor")
+  secretaryMaxDiscountMinor Int      @map("secretary_max_discount_minor")
+  secretaryMaxDiscountPct   Int      @map("secretary_max_discount_pct")
+  audioRetentionDays        Int      @default(30) @map("audio_retention_days")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@map("clinic_settings")
+}
+
+model Patient {
+  id                       String             @id @default(cuid())
+  fullName                 String             @map("full_name")
+  fullNameNorm             String             @map("full_name_norm")
+  dateOfBirth              DateTime           @map("date_of_birth")
+  phone                    String?
+  phoneNorm                String?            @map("phone_norm")
+  nationalId               String?            @map("national_id")
+  nationalIdNorm           String?            @map("national_id_norm")
+  guardianPhone            String?            @map("guardian_phone")
+  guardianPhoneNorm        String?            @map("guardian_phone_norm")
+  emergencyContactName     String?            @map("emergency_contact_name")
+  emergencyContactPhone    String?            @map("emergency_contact_phone")
+  emergencyContactRelation String?            @map("emergency_contact_relation")
+  physicalAddress          String?            @map("physical_address")
+  adminNotes               String?            @map("admin_notes") @db.VarChar(500)
+  registrationStatus       RegistrationStatus @default(COMPLETE) @map("registration_status")
+  duplicateOfPatientId     String?            @map("duplicate_of_patient_id")
+  outstandingBalanceMinor  Int                @default(0) @map("outstanding_balance_minor")
+  lastVisitAt              DateTime?          @map("last_visit_at")
+  createdAt                DateTime           @default(now()) @map("created_at")
+  createdByUserId          String             @map("created_by_user_id")
+
+  createdBy      User            @relation("PatientCreated", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  queueEntries   QueueEntry[]
+  invoices       Invoice[]
+  receipts       Receipt[]       @relation("ReceiptPatient")
+  followUpTasks  FollowUpTask[]
+  encounters     Encounter[]
+  medications    Medication[]
+  therapyNotes   TherapyNote[]
+  scribeSessions ScribeSession[]
+  scribeDrafts   ScribeDraft[]
+
+  @@unique([nationalIdNorm])
+  @@index([phoneNorm])
+  @@index([nationalIdNorm])
+  @@index([fullNameNorm])
+  @@index([guardianPhoneNorm])
+  @@index([duplicateOfPatientId])
+  @@index([registrationStatus])
+  @@index([lastVisitAt])
+  @@map("patients")
+}
+
+model Shift {
+  id                      String       @id @default(cuid())
+  businessDate            DateTime     @unique @map("business_date") @db.Date
+  status                  ShiftStatus  @default(OPEN)
+  // BE-305 blind open: openingFloatMinor is the cash PHYSICALLY in the drawer
+  // (the blind count). openingCarryForwardMinor is what the server derived from
+  // the prior closed shift's counted/verified cash (or the settings float), and
+  // openingDiscrepancyMinor = openingCount - carryForward. The float base stays
+  // the physical count so the close drawer formula reconciles exactly; the
+  // carry-forward variance is recorded, never silently absorbed into the float.
+  openingFloatMinor       Int          @default(0) @map("opening_float_minor")
+  openingCarryForwardMinor Int         @default(0) @map("opening_carry_forward_minor")
+  openingDiscrepancyMinor Int          @default(0) @map("opening_discrepancy_minor")
+  queueVersion            Int          @default(0) @map("queue_version")
+  expectedCashMinor       Int?         @map("expected_cash_minor")
+  actualCountedMinor      Int?         @map("actual_counted_minor")
+  differenceMinor         Int?         @map("difference_minor")
+  result                  ShiftResult?
+  integrityCheckPassed    Boolean?     @map("integrity_check_passed")
+  openedByUserId          String       @map("opened_by_user_id")
+  closedByUserId          String?      @map("closed_by_user_id")
+  closedAt                DateTime?    @map("closed_at")
+  reviewedByUserId        String?      @map("reviewed_by_user_id")
+  reviewedAt              DateTime?    @map("reviewed_at")
+  reviewNote              String?      @map("review_note")
+  closeIdempotencyKey     String?      @unique @map("close_idempotency_key")
+  createdAt               DateTime     @default(now()) @map("created_at")
+
+  openedBy      User           @relation("ShiftOpened", fields: [openedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  closedBy      User?          @relation("ShiftClosed", fields: [closedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  queueEntries  QueueEntry[]
+  invoices      Invoice[]
+  receipts      Receipt[]
+  pettyExpenses PettyExpense[]
+
+  @@index([status])
+  @@index([queueVersion])
+  @@map("shifts")
+}
+
+model QueueEntry {
+  id                   String      @id @default(cuid())
+  patientId            String      @map("patient_id")
+  shiftId              String      @map("shift_id")
+  status               QueueStatus @default(WAITING)
+  isEmergency          Boolean     @default(false) @map("is_emergency")
+  emergencyReason      String?     @map("emergency_reason")
+  position             Int
+  checkedInAt          DateTime    @default(now()) @map("checked_in_at")
+  calledAt             DateTime?   @map("called_at")
+  completedAt          DateTime?   @map("completed_at")
+  reorderCount         Int         @default(0) @map("reorder_count")
+  clinicalEncounterRef String?     @map("clinical_encounter_ref")
+  idempotencyKey       String      @map("idempotency_key")
+  undoWindowUntil      DateTime?   @map("undo_window_until")
+  emergencyFlaggedAt   DateTime?   @map("emergency_flagged_at")
+  emergencyReasonCode  String?     @map("emergency_reason_code")
+  emergencyFlaggedByUserId String? @map("emergency_flagged_by_user_id")
+  previousPosition     Int?        @map("previous_position")
+  skippedAt            DateTime?   @map("skipped_at")
+  noShowAt             DateTime?   @map("no_show_at")
+  noShowReasonCode     String?     @map("no_show_reason_code")
+  abandonAt            DateTime?   @map("abandon_at")
+  abandonReasonCode    String?     @map("abandon_reason_code")
+  abandonBillable      Boolean?    @map("abandon_billable")
+  outOfOrderReasonCode String?     @map("out_of_order_reason_code")
+  debtAckAt            DateTime?   @map("debt_ack_at")
+  debtAckByUserId      String?     @map("debt_ack_by_user_id")
+
+  patient       Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  shift         Shift             @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  invoice       Invoice?          @relation("QueueInvoice")
+  intercomLinks IntercomMessage[] @relation("IntercomQueueLink")
+  callRequests  CallRequest[]
+
+  @@unique([shiftId, idempotencyKey])
+  @@index([shiftId, status, position])
+  @@index([patientId, checkedInAt])
+  @@index([clinicalEncounterRef])
+  @@index([shiftId, emergencyFlaggedAt])
+  @@map("queue_entries")
+}
+
+model CallRequest {
+  id                String            @id @default(cuid())
+  queueEntryId      String            @map("queue_entry_id")
+  requestedByUserId String            @map("requested_by_user_id")
+  status            CallRequestStatus @default(PENDING)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  queueEntry  QueueEntry @relation(fields: [queueEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedBy User       @relation("CallRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([queueEntryId, status])
+  @@index([status])
+  @@map("call_requests")
+}
+
+model Invoice {
+  id                              String        @id @default(cuid())
+  patientId                       String        @map("patient_id")
+  queueEntryId                    String        @unique @map("queue_entry_id")
+  shiftId                         String        @map("shift_id")
+  queueEntryRefPlain              String?       @map("queue_entry_ref_plain")
+  standardFeeMinor                Int           @map("standard_fee_minor")
+  finalFeeMinor                   Int           @map("final_fee_minor")
+  discountMinor                   Int           @default(0) @map("discount_minor")
+  discountReason                  String?       @map("discount_reason")
+  isComplimentary                 Boolean       @default(false) @map("is_complimentary")
+  complimentaryAuthorizedByUserId String?       @map("complimentary_authorized_by_user_id")
+  collectedMinor                  Int           @default(0) @map("collected_minor")
+  writeOffMinor                   Int           @default(0) @map("write_off_minor")
+  writeOffReason                  String?       @map("write_off_reason")
+  outstandingMinor                Int           @default(0) @map("outstanding_minor")
+  status                          InvoiceStatus @default(UNPAID)
+  source                          String        @default("CHECKIN_AUTO")
+  idempotencyKey                  String        @map("idempotency_key")
+  createdAt                       DateTime      @default(now()) @map("created_at")
+  createdByUserId                 String        @map("created_by_user_id")
+
+  patient                   Patient           @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  queueEntry                QueueEntry        @relation("QueueInvoice", fields: [queueEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  shift                     Shift             @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy                 User              @relation("InvoiceCreated", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  complimentaryAuthorizedBy User?             @relation("ComplimentaryAuth", fields: [complimentaryAuthorizedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  receipts                  Receipt[]
+  intercomLinks             IntercomMessage[] @relation("IntercomInvoiceLink")
+
+  @@unique([shiftId, idempotencyKey])
+  @@index([shiftId, status])
+  @@index([patientId, status])
+  @@map("invoices")
+}
+
+model Receipt {
+  id                  String        @id @default(cuid())
+  invoiceId           String        @map("invoice_id")
+  patientId           String        @map("patient_id")
+  shiftId             String        @map("shift_id")
+  actorUserId         String        @map("actor_user_id")
+  type                ReceiptType
+  amountMinor         Int           @map("amount_minor")
+  paymentMethod       PaymentMethod @default(CASH) @map("payment_method")
+  reversalOfReceiptId String?       @map("reversal_of_receipt_id")
+  reason              String?
+  idempotencyKey      String        @map("idempotency_key")
+  createdAt           DateTime      @default(now()) @map("created_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  patient Patient @relation("ReceiptPatient", fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  shift   Shift   @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  actor   User    @relation("ReceiptActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([shiftId, idempotencyKey])
+  @@index([invoiceId, createdAt])
+  @@index([shiftId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([reversalOfReceiptId])
+  @@map("receipts")
+}
+
+model PettyExpense {
+  id             String         @id @default(cuid())
+  shiftId        String         @map("shift_id")
+  amountMinor    Int            @map("amount_minor")
+  // `purpose` column is reused as the description (BE-304 renames the ticket's
+  // `purpose` wording to `description` + `category`); no DDL needed for the rename.
+  description    String         @map("purpose")
+  category       String
+  direction      PettyDirection @default(EXPENSE)
+  receiptRef     String?        @map("receipt_ref")
+  actorUserId    String         @map("actor_user_id")
+  idempotencyKey String         @map("idempotency_key")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  actor User  @relation("PettyActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([shiftId, idempotencyKey])
+  @@index([shiftId, createdAt])
+  @@map("petty_expenses")
+}
+
+model IntercomMessage {
+  id                  String       @id @default(cuid())
+  fromUserId          String       @map("from_user_id")
+  fromRole            Role         @map("from_role")
+  messageType         IntercomType @map("message_type")
+  bodyText            String?      @map("body_text") @db.VarChar(1000)
+  relatedQueueEntryId String?      @map("related_queue_entry_id")
+  relatedInvoiceId    String?      @map("related_invoice_id")
+  idempotencyKey      String?      @map("idempotency_key")
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  fromUser          User           @relation("IntercomSender", fields: [fromUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  relatedQueueEntry QueueEntry?    @relation("IntercomQueueLink", fields: [relatedQueueEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  relatedInvoice    Invoice?       @relation("IntercomInvoiceLink", fields: [relatedInvoiceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  followups         FollowUpTask[] @relation("FollowupSource")
+
+  @@index([createdAt])
+  @@index([relatedQueueEntryId, createdAt])
+  @@map("intercom_messages")
+}
+
+model FollowUpTask {
+  id                String    @id @default(cuid())
+  patientId         String    @map("patient_id")
+  requestedByUserId String    @map("requested_by_user_id")
+  // Full doctor instruction (Decision 5): capacity matches the intercom text
+  // budget (1000) so the note is never silently truncated — migration 0013.
+  note              String    @db.VarChar(1000)
+  // Decision 5 canonical vocabulary (see intercom.validators.ts followUpSchema).
+  followUpType      String    @default("GENERAL") @map("follow_up_type")
+  window            String    @default("NEXT_VISIT") @map("follow_up_window")
+  status            String    @default("REQUESTED")
+  requestedAt       DateTime  @default(now()) @map("requested_at")
+  resolvedAt        DateTime? @map("resolved_at")
+  sourceMessageId   String?   @map("source_message_id")
+
+  patient       Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedBy   User             @relation("FollowupRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  sourceMessage IntercomMessage? @relation("FollowupSource", fields: [sourceMessageId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([patientId, status])
+  @@map("follow_up_tasks")
+}
+
+model Encounter {
+  id                   String          @id @default(cuid())
+  patientId            String          @map("patient_id")
+  queueEntryRef        String?         @map("queue_entry_ref")
+  source               EncounterSource @default(MANUAL)
+  // BE-501 independent manual path: visit date + encounter type are free-form
+  // clinical descriptors (no FK, no enum constraint at DB level).
+  visitDate            DateTime?       @map("visit_date")
+  encounterType        String?         @map("encounter_type")
+  soapSubjective       String?         @map("soap_subjective")
+  soapObjective        String?         @map("soap_objective")
+  soapAssessment       String?         @map("soap_assessment")
+  soapPlan             String?         @map("soap_plan")
+  mseAppearance        String          @default("NOT_PERFORMED") @map("mse_appearance")
+  mseBehavior          String          @default("NOT_PERFORMED") @map("mse_behavior")
+  mseSpeechCoherence   String          @default("NOT_PERFORMED") @map("mse_speech_coherence")
+  mseMoodAffect        String          @default("NOT_PERFORMED") @map("mse_mood_affect")
+  diagnoses            Json            @default("[]")
+  diagnosisNotes       String?         @map("diagnosis_notes")
+  status               EncounterStatus @default(DRAFT)
+  // BE-501 OCC: rowVersion starts at 1, increments on every PATCH/sign.
+  rowVersion           Int             @default(1) @map("row_version")
+  finalContentHash     String?         @map("final_content_hash")
+  signedByUserId       String?         @map("signed_by_user_id")
+  signedAt             DateTime?       @map("signed_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  addendumCount        Int             @default(0) @map("addendum_count")
+  // Holds the originating SCRIBE session id (not a draft id — historical name).
+  // Unique so one session can never produce two signed encounters; Postgres
+  // unique indexes treat NULLs as distinct, so MANUAL encounters (NULL) are
+  // unaffected. Durable authority behind the commit status claim — migration 0012.
+  originScribeDraftRef String?         @unique @map("origin_scribe_draft_ref")
+
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  signedBy User?   @relation("EncounterSigner", fields: [signedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  addenda  EncounterAddendum[] @relation("EncounterAddenda")
+
+  @@index([patientId, signedAt])
+  @@index([status])
+  @@index([source])
+  @@index([queueEntryRef])
+  @@map("encounters")
+}
+
+// BE-501 append-only versioned addenda (clinical -> clinical, SIGNED-only).
+// Plain FK to Encounter (both clinical-side, retained); no operational edge.
+model EncounterAddendum {
+  id              String   @id @default(cuid())
+  encounterId     String   @map("encounter_id")
+  version         Int
+  text            String
+  reasonCode      String   @map("reason_code")
+  createdByUserId String   @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  encounter Encounter @relation("EncounterAddenda", fields: [encounterId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User      @relation("AddendumAuthor", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([encounterId, version])
+  @@index([encounterId, version])
+  @@map("encounter_addenda")
+}
+
+model Medication {
+  id                 String           @id @default(cuid())
+  patientId          String           @map("patient_id")
+  encounterRef       String?          @map("encounter_ref")
+  drugName           String           @map("drug_name")
+  dosage             String
+  frequency          String
+  instructions       String
+  status             MedicationStatus @default(ACTIVE)
+  // BE-502: cessationReason stores the CessationReasonCode enum value;
+  // cessationNote is mandatory when code is OTHER (422 otherwise).
+  cessationReason    String?          @map("cessation_reason")
+  cessationNote      String?          @map("cessation_note")
+  // BE-502 titration link: old DISCONTINUED row -> new ACTIVE row.
+  supersededByMedicationId String?    @map("superseded_by_medication_id")
+  startedAt          DateTime         @default(now()) @map("started_at")
+  stoppedAt          DateTime?        @map("stopped_at")
+  prescribedByUserId String           @map("prescribed_by_user_id")
+
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  prescribedBy User    @relation("MedicationPrescriber", fields: [prescribedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([patientId, status, startedAt])
+  @@index([drugName])
+  @@index([encounterRef])
+  @@map("medications")
+}
+
+model TherapyNote {
+  id              String    @id @default(cuid())
+  patientId       String    @map("patient_id")
+  encounterRef    String?   @map("encounter_ref")
+  // BE-503 envelope: ciphertext + wrappedDek are NULLABLE so the shred verb can
+  // null them while retaining the tombstone row (id/patientId/keyId/dates).
+  ciphertext      String?
+  wrappedDek      String?   @map("wrapped_dek")
+  nonce           String?
+  keyId           String    @map("key_id")
+  // BE-503 vault metadata: clinical date, per-patient sequence, supersede link.
+  noteDate        DateTime? @map("note_date")
+  seq             Int       @default(1)
+  supersedesNoteId String?  @map("supersedes_note_id")
+  shreddedAt      DateTime? @map("shredded_at")
+  createdByUserId String    @map("created_by_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User    @relation("VaultCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([patientId, createdAt])
+  @@map("therapy_notes")
+}
+
+model ScribeSession {
+  id                  String              @id @default(cuid())
+  patientId           String              @map("patient_id")
+  encounterRef        String?             @map("encounter_ref")
+  queueEntryRef       String?             @map("queue_entry_ref")
+  mode                ScribeMode
+  audioReference      String?             @map("audio_reference")
+  durationSec         Int?                @map("duration_sec")
+  consentStatus       ConsentStatus       @default(GRANTED) @map("consent_status")
+  consentedAt         DateTime            @map("consented_at")
+  withdrawnAt         DateTime?           @map("withdrawn_at")
+  withdrawalReason    String?             @map("withdrawal_reason")
+  status              ScribeSessionStatus @default(UPLOADED)
+  audioRetentionUntil DateTime?           @map("audio_retention_until")
+  transcriptReference String?             @map("transcript_reference")
+  createdByUserId     String              @map("created_by_user_id")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  stoppedAt           DateTime?           @map("stopped_at")
+
+  patient   Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdBy User          @relation("ScribeCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  drafts    ScribeDraft[]
+
+  @@index([patientId, createdAt])
+  @@index([status])
+  @@index([audioRetentionUntil])
+  @@map("scribe_sessions")
+}
+
+model ScribeDraft {
+  id                  String            @id @default(cuid())
+  scribeSessionId     String            @map("scribe_session_id")
+  patientId           String            @map("patient_id")
+  mseSnapshot         Json              @map("mse_snapshot")
+  transcriptReference String?           @map("transcript_reference")
+  soapDraftS          String            @map("soap_draft_s")
+  soapDraftO          String            @map("soap_draft_o")
+  soapDraftA          String            @map("soap_draft_a")
+  soapDraftP          String            @map("soap_draft_p")
+  confidenceScore     Float?            @map("confidence_score")
+  version             Int               @default(1)
+  status              ScribeDraftStatus @default(DRAFT)
+  createdAt           DateTime          @default(now()) @map("created_at")
+  signedEncounterRef  String?           @map("signed_encounter_ref")
+
+  session ScribeSession @relation(fields: [scribeSessionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  patient Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([scribeSessionId, version])
+  @@index([patientId, createdAt])
+  @@index([signedEncounterRef])
+  @@map("scribe_drafts")
+}
+
+model AuditEvent {
+  id             String      @id @default(cuid())
+  actorUserId    String      @map("actor_user_id")
+  actorRole      Role        @map("actor_role")
+  action         AuditAction
+  entityType     String      @map("entity_type")
+  entityId       String      @map("entity_id")
+  beforeState    Json?       @map("before_state")
+  afterState     Json?       @map("after_state")
+  reasonText     String?     @map("reason_text")
+  requestId      String?     @unique @map("request_id")
+  idempotencyKey String?     @map("idempotency_key")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_events")
+}
+
+// BE-301..303 idempotency ledger (DB-08). Stores the cached response for every
+// financial write keyed by (scope, actor, key) with a 24h TTL. Plain actorUserId
+// ref (operational-only, no clinical relation, no FK — keeps migration minimal
+// and mirrors the DB-02 posture used by other operational plain refs).
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  scope          String
+  key            String
+  actorUserId    String   @map("actor_user_id")
+  requestHash    String   @map("request_hash")
+  responseStatus Int      @map("response_status")
+  responseBody   Json
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
+
+  @@unique([scope, actorUserId, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
