@@ -3,13 +3,14 @@ import {
   emergencyToggleSchema,
   reorderSchema,
   waitTimesQuerySchema,
+  deferDocumentationSchema,
 } from '../src/modules/identity-queue/queue.validators.js';
 import { computeEstimatedWaitMin } from '../src/modules/identity-queue/queue.support.js';
 import { normalizeArabic, normalizeName } from '../src/modules/identity-queue/patient.normalize.js';
 import { searchPatients } from '../src/modules/identity-queue/patient.search.js';
 import type { PrismaClient } from '@prisma/client';
 import { AppError } from '../src/common/errors/AppError.js';
-import { toggleEmergency } from '../src/modules/identity-queue/queue.service.js';
+import { toggleEmergency, deferDocumentation } from '../src/modules/identity-queue/queue.service.js';
 
 // ---------------------------------------------------------------------------
 // BE-203 acceptance gate 1: reorder OCC error code carries 409 (STALE_QUEUE).
@@ -297,5 +298,56 @@ import { toggleEmergency } from '../src/modules/identity-queue/queue.service.js'
   assert.equal(writtenAudits[0].actorRole, 'SECRETARY');
 }
 
+// ---------------------------------------------------------------------------
+// P1-6: Documentation deferral validator & service behavior
+// ---------------------------------------------------------------------------
+{
+  // 1. Validator checks
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'بانتظار الفحوصات' }).success, true);
+  assert.equal(deferDocumentationSchema.safeParse({ reason: '  ab  ' }).success, false, 'Less than 3 chars rejected');
+  assert.equal(deferDocumentationSchema.safeParse({}).success, false, 'Missing reason rejected');
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'x'.repeat(301) }).success, false, 'Over 300 chars rejected');
+  assert.equal(deferDocumentationSchema.safeParse({ reason: 'Valid reason', extra: 1 }).success, false, 'Strict');
+
+  // 2. Service checks
+  const writtenAudits: Array<{ action: string; entityType: string; entityId: string; reasonText: string | null; actorRole: string }> = [];
+  const entry = { id: 'entry-defer-1', patientId: 'p-1', shiftId: 'shift-1', status: 'COMPLETED' };
+
+  const mockDb = {
+    queueEntry: {
+      findUnique: async () => entry,
+    },
+    auditEvent: {
+      create: async (args: { data: { action: string; entityType: string; entityId: string; reasonText: string | null; actorRole: string } }) => {
+        writtenAudits.push(args.data);
+        return args.data;
+      },
+    },
+  } as unknown as PrismaClient;
+
+  // Secretary cannot defer documentation
+  await assert.rejects(
+    () => deferDocumentation('entry-defer-1', { reason: 'بانتظار التحاليل الطبية' }, { userId: 'sec-1', role: 'SECRETARY' }, mockDb),
+    (err: unknown) => err instanceof AppError && err.code === 'FORBIDDEN',
+  );
+
+  // Doctor can defer documentation
+  const deferRes = await deferDocumentation(
+    'entry-defer-1',
+    { reason: 'بانتظار التحاليل الطبية' },
+    { userId: 'doc-1', role: 'DOCTOR' },
+    mockDb,
+  );
+
+  assert.equal(deferRes.success, true);
+  assert.equal(deferRes.queueEntryId, 'entry-defer-1');
+  assert.equal(deferRes.reason, 'بانتظار التحاليل الطبية');
+  assert.equal(writtenAudits.length, 1);
+  assert.equal(writtenAudits[0]?.entityType, 'DocumentationDeferral');
+  assert.equal(writtenAudits[0]?.entityId, 'entry-defer-1');
+  assert.equal(writtenAudits[0]?.reasonText, 'بانتظار التحاليل الطبية');
+  assert.equal(writtenAudits[0]?.actorRole, 'DOCTOR');
+}
+
 // eslint-disable-next-line no-console
-console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search + P1-3 unflag tests passed.');
+console.log('BE-203 reorder/emergency/wait-time validator + formula + P0-3 search + P1-3 unflag + P1-6 deferral tests passed.');

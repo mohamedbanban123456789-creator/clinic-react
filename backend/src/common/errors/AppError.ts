@@ -53,6 +53,7 @@ export type ErrorCode =
   | 'GROQ_TIMEOUT'
   | 'GROQ_UPSTREAM'
   | 'INVOICE_ALREADY_WRITTEN_OFF'
+  | 'DOCUMENTATION_REQUIRED'
   | 'INTERNAL';
 
 const StatusByCode: Record<ErrorCode, number> = {
@@ -102,6 +103,7 @@ const StatusByCode: Record<ErrorCode, number> = {
   GROQ_TIMEOUT: 504,
   GROQ_UPSTREAM: 502,
   INVOICE_ALREADY_WRITTEN_OFF: 400,
+  DOCUMENTATION_REQUIRED: 409,
   INTERNAL: 500,
 };
 

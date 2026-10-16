@@ -7,26 +7,197 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useAuth } from "@/auth/AuthContext"
 import { useQueue, useQueueInvalidation } from "@/hooks/useQueue"
 import { queueApi } from "@/api/queue"
 import { supervisionApi, settingsApi } from "@/api/admin"
 import { billingApi } from "@/api/billing"
-import { apiErrorMessage } from "@/api/client"
+import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
 import { FloatingChat } from "@/components/Conversation"
-import { arNum, arTimer } from "@/lib/format"
+import { arNum, arTimer, arDate } from "@/lib/format"
+import type { UnsignedNotesDto } from "@/api/types"
+
+function ReviewModal({
+  data,
+  onClose,
+  onRefresh,
+}: {
+  data: UnsignedNotesDto | undefined
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  const { notify } = useToast()
+  const navigate = useNavigate()
+  const [deferringEntryId, setDeferringEntryId] = useState<string | null>(null)
+  const [deferReason, setDeferReason] = useState("")
+
+  const deferMutation = useMutation({
+    mutationFn: ({ entryId, reason }: { entryId: string; reason: string }) =>
+      queueApi.deferDocumentation(entryId, reason),
+    onSuccess: () => {
+      notify("تم تسجيل تأجيل التوثيق بنجاح")
+      setDeferringEntryId(null)
+      setDeferReason("")
+      onRefresh()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const unsignedList = (data?.completedWithoutSigned ?? []).filter((c) => !c.isDeferred)
+  const deferredList = (data?.completedWithoutSigned ?? []).filter((c) => c.isDeferred)
+
+  return (
+    <Modal
+      title="مراجعة التوثيق والكشوفات"
+      subtitle="الكشوفات المكتملة غير الموثقة والتأجيلات المسجلة اليوم."
+      onClose={onClose}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem", textAlign: "right" }}>
+        <div>
+          <h4 style={{ margin: "0 0 0.5rem 0", color: "#1e1b4b" }}>
+            كشوفات بانتظار التوثيق والتوقيع ({arNum(unsignedList.length)})
+          </h4>
+          {unsignedList.length === 0 ? (
+            <p style={{ color: "#6b7280", margin: 0, fontSize: "0.9rem" }}>
+              جميع كشوفات اليوم موثقة وموقعة بنجاح.
+            </p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              {unsignedList.map((item) => (
+                <div
+                  key={item.queueEntryId}
+                  style={{
+                    padding: "0.75rem",
+                    borderRadius: "8px",
+                    background: "#fef2f2",
+                    border: "1px solid #fecaca",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <strong style={{ fontSize: "1rem" }}>{item.displayName}</strong>
+                      <span style={{ fontSize: "0.8rem", color: "#6b7280", marginRight: "0.5rem" }}>
+                        اكتمل الكشف {item.completedAt ? arDate(item.completedAt) : ""}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <AppButton
+                        variant="primary"
+                        onClick={() => {
+                          onClose()
+                          navigate(`/doctor/soap?patientId=${item.patientId}&queueEntryId=${item.queueEntryId}`)
+                        }}
+                      >
+                        توثيق SOAP
+                      </AppButton>
+                      <AppButton
+                        variant="outline"
+                        onClick={() => {
+                          setDeferringEntryId(item.queueEntryId)
+                          setDeferReason("")
+                        }}
+                      >
+                        تأجيل التوثيق
+                      </AppButton>
+                    </div>
+                  </div>
+
+                  {deferringEntryId === item.queueEntryId && (
+                    <div style={{ marginTop: "0.75rem", padding: "0.5rem", background: "#fff", borderRadius: "6px", border: "1px solid #e5e7eb" }}>
+                      <label style={{ display: "block", fontSize: "0.85rem", fontWeight: "bold", marginBottom: "0.25rem" }}>
+                        سبب تأجيل التوثيق (مطلوب):
+                      </label>
+                      <input
+                        value={deferReason}
+                        onChange={(e) => setDeferReason(e.target.value)}
+                        placeholder="اكتب سبب التأجيل (مثال: بانتظار نتائج التحاليل، انشغال طارئ)..."
+                        style={{ width: "100%", padding: "0.4rem 0.6rem", borderRadius: "4px", border: "1px solid #d1d5db", fontSize: "0.85rem" }}
+                      />
+                      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", justifyContent: "flex-end" }}>
+                        <AppButton variant="outline" onClick={() => setDeferringEntryId(null)}>
+                          إلغاء
+                        </AppButton>
+                        <AppButton
+                          variant="secondary"
+                          onClick={() =>
+                            deferMutation.mutate({ entryId: item.queueEntryId, reason: deferReason.trim() })
+                          }
+                          disabled={deferMutation.isPending || deferReason.trim().length < 3}
+                        >
+                          {deferMutation.isPending ? "جارٍ الحفظ..." : "تأكيد التأجيل"}
+                        </AppButton>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {deferredList.length > 0 && (
+          <div>
+            <h4 style={{ margin: "0 0 0.5rem 0", color: "#b45309" }}>
+              حالات التوثيق المؤجلة ({arNum(deferredList.length)})
+            </h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {deferredList.map((item) => (
+                <div
+                  key={item.queueEntryId}
+                  style={{
+                    padding: "0.6rem 0.75rem",
+                    borderRadius: "6px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <div style={{ fontSize: "0.8rem", color: "#78350f" }}>
+                      سبب التأجيل: {item.deferredReason || "غير محدد"}
+                    </div>
+                  </div>
+                  <AppButton
+                    variant="outline"
+                    onClick={() => {
+                      onClose()
+                      navigate(`/doctor/soap?patientId=${item.patientId}&queueEntryId=${item.queueEntryId}`)
+                    }}
+                  >
+                    توثيق الآن
+                  </AppButton>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <AppButton variant="outline" onClick={onClose}>
+            إغلاق
+          </AppButton>
+        </div>
+      </div>
+    </Modal>
+  )
+}
 
 export default function DoctorDashboard() {
   const { user } = useAuth()
   const isDoctor = user?.role === "DOCTOR"
   const navigate = useNavigate()
   const { notify } = useToast()
+  const queryClient = useQueryClient()
   const { entries, isLoading, queueVersion } = useQueue()
   const invalidate = useQueueInvalidation()
   const [chatOpen, setChatOpen] = useState(false)
   const [showComplimentary, setShowComplimentary] = useState(false)
+  const [showReviewModal, setShowReviewModal] = useState(false)
 
   const settingsQuery = useQuery({
     queryKey: ["settings"],
@@ -72,7 +243,13 @@ export default function DoctorDashboard() {
       notify(`تم استدعاء ${entry.displayName}`)
       invalidate()
     },
-    onError: (err) => notify(apiErrorMessage(err), "error"),
+    onError: (err) => {
+      const msg = apiErrorMessage(err)
+      notify(msg, "error")
+      if ((err as ApiError)?.code === "DOCUMENTATION_REQUIRED" || msg.includes("توثيق")) {
+        setShowReviewModal(true)
+      }
+    },
   })
 
   const skipMutation = useMutation({
@@ -191,7 +368,11 @@ export default function DoctorDashboard() {
         <StatCard
           label="تقارير للمراجعة"
           value={arNum(draftsCount)}
-          hint="مسودات وزيارات غير موثقة"
+          hint={
+            (unsignedQuery.data?.deferralCount ?? 0) > 0
+              ? `${arNum(unsignedQuery.data?.deferralCount ?? 0)} كشف مؤجل التوثيق`
+              : "مسودات وزيارات غير موثقة"
+          }
           icon="sparkle"
           tone="violet"
         />
@@ -257,15 +438,19 @@ export default function DoctorDashboard() {
             <div className="ai-icon">
               <Icon name="sparkle" />
             </div>
-            <span className="section-kicker">مساعد التوثيق</span>
+            <span className="section-kicker">المراجعة والتوثيق</span>
             <h3>
               {draftsCount > 0
-                ? `${arNum(draftsCount)} ${draftsCount === 1 ? "مسودة" : "مسودات"} بانتظار المراجعة`
-                : "لا مسودات معلقة"}
+                ? `${arNum(draftsCount)} ${draftsCount === 1 ? "كشف بحاجة للتوثيق" : "كشوفات بحاجة للتوثيق"}`
+                : "جميع الكشوفات موثقة"}
             </h3>
-            <p>أنهِ مراجعة تقارير SOAP قبل اعتماد سجل اليوم.</p>
-            <AppButton variant="secondary" onClick={() => navigate("/doctor/soap")}>
-              مراجعة التقارير
+            <p>
+              {(unsignedQuery.data?.deferralCount ?? 0) > 0
+                ? `هناك ${arNum(unsignedQuery.data?.deferralCount ?? 0)} حالة توثيق مؤجلة تتطلب المتابعة.`
+                : "راجع كشوفات اليوم غير الموقعة والتأجيلات المسجلة."}
+            </p>
+            <AppButton variant="secondary" onClick={() => setShowReviewModal(true)}>
+              مراجعة
             </AppButton>
           </section>
           <section className="card admin-access">
@@ -286,6 +471,17 @@ export default function DoctorDashboard() {
         setOpen={setChatOpen}
         onComplimentary={() => setShowComplimentary(true)}
       />
+
+      {showReviewModal && (
+        <ReviewModal
+          data={unsignedQuery.data}
+          onClose={() => setShowReviewModal(false)}
+          onRefresh={() => {
+            void unsignedQuery.refetch()
+            invalidate()
+          }}
+        />
+      )}
 
       {showComplimentary && (
         <Modal

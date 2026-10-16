@@ -541,6 +541,9 @@ export interface UnsignedNotesDto {
     status: string
     completedAt: string
     hasSignedEncounter: boolean
+    isDeferred?: boolean
+    deferredReason?: string | null
+    deferredAt?: string | null
   }[]
   staleDrafts: {
     draftKind: "ENCOUNTER" | "SCRIBE"
@@ -551,6 +554,7 @@ export interface UnsignedNotesDto {
     ageHours: number
     stale: boolean
   }[]
+  deferralCount?: number
 }
 
 export interface DiscountItemDto {

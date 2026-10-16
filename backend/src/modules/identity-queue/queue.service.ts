@@ -41,6 +41,7 @@ import type {
   CallInput,
   CallNextInput,
   CheckInInput,
+  DeferDocumentationInput,
   EmergencyToggleInput,
   NoShowInput,
   ReorderInput,
@@ -350,6 +351,53 @@ export async function listQueue(
   return toSecretQueueListDto(shiftId, queueVersion, headWait, entries);
 }
 
+async function assertNoUnsignedDocumentation(shiftId: string, db: PrismaClient): Promise<void> {
+  const completedEntries = await db.queueEntry.findMany({
+    where: { shiftId, status: 'COMPLETED' },
+    include: { patient: { select: { fullName: true } } },
+    orderBy: { completedAt: 'desc' },
+  });
+  if (completedEntries.length === 0) return;
+
+  const entryIds = completedEntries.map((e) => e.id);
+
+  const signedEncounters = await db.encounter.findMany({
+    where: { queueEntryRef: { in: entryIds }, status: 'SIGNED' },
+    select: { queueEntryRef: true },
+  });
+  const signedRefs = new Set<string>();
+  for (const s of signedEncounters) {
+    if (s.queueEntryRef !== null) signedRefs.add(s.queueEntryRef);
+  }
+
+  const deferredAudits = await db.auditEvent.findMany({
+    where: {
+      entityType: 'DocumentationDeferral',
+      entityId: { in: entryIds },
+    },
+    select: { entityId: true },
+  });
+  const deferredRefs = new Set<string>(deferredAudits.map((a) => a.entityId));
+
+  const missing = completedEntries.find((e) => !signedRefs.has(e.id) && !deferredRefs.has(e.id));
+  if (missing !== undefined) {
+    throw new AppError(
+      'DOCUMENTATION_REQUIRED',
+      `لا يمكن استدعاء مريض جديد قبل توثيق وتوقيع كشف المريض السابق (${missing.patient.fullName})، أو تأجيل التوثيق مع ذكر السبب.`,
+      [
+        {
+          field: 'documentation',
+          issue: `المريض ${missing.patient.fullName} لم يُوقع كشفه بعد`,
+          expected: 'توقيع كشف SOAP أو تأجيل التوثيق',
+          queueEntryId: missing.id,
+          patientId: missing.patientId,
+          displayName: missing.patient.fullName,
+        },
+      ],
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/v1/queue/call-next  [DOCTOR]  -> 200 SecretSafe<QueueEntryDto>
 // ---------------------------------------------------------------------------
@@ -359,6 +407,8 @@ export async function callNext(
   db: PrismaClient = prisma,
 ): Promise<SecretSafe<QueueEntryDto>> {
   const shift = await getOpenShiftOrThrow(db);
+
+  await assertNoUnsignedDocumentation(shift.id, db);
 
   const current = await db.queueEntry.findFirst({
     where: { shiftId: shift.id, status: 'IN_CONSULTATION' },
@@ -432,6 +482,7 @@ export async function callEntry(
   db: PrismaClient = prisma,
 ): Promise<SecretSafe<QueueEntryDto>> {
   const shift = await getOpenShiftOrThrow(db);
+  await assertNoUnsignedDocumentation(shift.id, db);
   const entry = await loadQueueEntry(db, entryId);
   if (entry.shiftId !== shift.id) {
     throw new AppError('NOT_FOUND', 'Queue entry not in open shift');
@@ -1271,6 +1322,45 @@ export async function getWaitTimes(
   }));
 
   return toSecretWaitTimesDto(avg, items);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/queue/:entryId/defer-documentation [DOCTOR]
+// ---------------------------------------------------------------------------
+export async function deferDocumentation(
+  entryId: string,
+  input: DeferDocumentationInput,
+  actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<{ success: true; queueEntryId: string; reason: string; deferredAt: string }> {
+  if (actor.role !== 'DOCTOR') {
+    throw AppError.forbidden('Only a doctor may defer documentation');
+  }
+  const entry = await loadQueueEntry(db, entryId);
+  const now = new Date();
+  await writeQueueAudit(db, {
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+    action: 'ENCOUNTER_UPDATE',
+    entityId: entry.id,
+    entityType: 'DocumentationDeferral' as never,
+    reasonText: input.reason,
+    requestId: randomUUID(),
+    beforeState: { status: entry.status },
+    afterState: {
+      type: 'DOCUMENTATION_DEFER',
+      queueEntryId: entry.id,
+      patientId: entry.patientId,
+      reason: input.reason,
+      deferredAt: now.toISOString(),
+    },
+  });
+  return {
+    success: true,
+    queueEntryId: entry.id,
+    reason: input.reason,
+    deferredAt: now.toISOString(),
+  };
 }
 
 

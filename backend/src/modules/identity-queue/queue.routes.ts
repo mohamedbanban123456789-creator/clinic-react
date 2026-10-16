@@ -11,6 +11,7 @@ import {
   checkIn,
   completeEntry,
   debtAck,
+  deferDocumentation,
   getWaitTimes,
   listQueue,
   markNoShow,
@@ -26,6 +27,7 @@ import {
   callSchema,
   checkInSchema,
   debtAckSchema,
+  deferDocumentationSchema,
   emergencyToggleSchema,
   entryIdParamSchema,
   noShowSchema,
@@ -38,6 +40,7 @@ import {
   type CallInput,
   type CallNextInput,
   type CheckInInput,
+  type DeferDocumentationInput,
   type EmergencyToggleInput,
   type NoShowInput,
   type ReorderInput,
@@ -270,6 +273,21 @@ queueRouter.post(
     const params = req.params as { entryId: string };
     debtAck(params.entryId, { userId: auth.userId, role: auth.role })
       .then((entry) => res.status(200).json(entry))
+      .catch(next);
+  },
+);
+
+// POST /api/v1/queue/:entryId/defer-documentation  [DOCTOR]
+queueRouter.post(
+  '/:entryId/defer-documentation',
+  requireRole('DOCTOR'),
+  validate(entryIdParamSchema, 'params'),
+  validate(deferDocumentationSchema),
+  (req: Request, res: Response, next: NextFunction): void => {
+    const auth = requireAuth(req);
+    const params = req.params as { entryId: string };
+    deferDocumentation(params.entryId, req.body as DeferDocumentationInput, { userId: auth.userId, role: auth.role })
+      .then((result) => res.status(200).json(result))
       .catch(next);
   },
 );

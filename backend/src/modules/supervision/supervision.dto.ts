@@ -111,6 +111,9 @@ export interface UnsignedCompletedVisit {
   readonly status: string;
   readonly completedAt: string | null;
   readonly hasSignedEncounter: boolean;
+  readonly isDeferred?: boolean;
+  readonly deferredReason?: string | null;
+  readonly deferredAt?: string | null;
 }
 
 export interface StaleUnsignedDraft {
@@ -127,6 +130,7 @@ export interface UnsignedNotesDto {
   readonly shiftId: string | null;
   readonly completedWithoutSigned: readonly UnsignedCompletedVisit[];
   readonly staleDrafts: readonly StaleUnsignedDraft[];
+  readonly deferralCount: number;
 }
 
 // ---------------------------------------------------------------------------

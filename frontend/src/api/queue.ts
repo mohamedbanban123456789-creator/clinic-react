@@ -136,4 +136,14 @@ export const queueApi = {
       body: {},
     })
   },
+
+  deferDocumentation(
+    entryId: string,
+    reason: string,
+  ): Promise<{ success: true; queueEntryId: string; reason: string; deferredAt: string }> {
+    return apiRequest(`/queue/${entryId}/defer-documentation`, {
+      method: "POST",
+      body: { reason },
+    })
+  },
 }

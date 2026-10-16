@@ -49,6 +49,18 @@ export const callNextSchema = z
   })
   .strict();
 
+export const deferDocumentationSchema = z
+  .object({
+    reason: z
+      .string({ required_error: 'reason is required', invalid_type_error: 'reason must be a string' })
+      .trim()
+      .min(3, 'reason must be at least 3 characters')
+      .max(300, 'reason must be at most 300 characters'),
+  })
+  .strict();
+
+export type DeferDocumentationInput = z.infer<typeof deferDocumentationSchema>;
+
 export const callSchema = z
   .object({
     outOfOrderReasonCode: reasonCode('outOfOrderReasonCode', 120).optional(),

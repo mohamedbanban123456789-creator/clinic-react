@@ -47,7 +47,6 @@ const doctorNav: { section: string; items: NavItem[] }[] = [
       { to: "/doctor", label: "لوحة الطبيب", icon: "grid", match: ["/doctor"] },
       { to: "/doctor/patients", label: "ملفات المرضى", icon: "users", match: ["/doctor/patients", "/doctor/patients/"] },
       { to: "/doctor/session", label: "الجلسة الحالية", icon: "mic", match: ["/doctor/session"] },
-      { to: "/doctor/soap", label: "تقارير SOAP", icon: "file", match: ["/doctor/soap"] },
       { to: "/doctor/medications", label: "إدارة الأدوية", icon: "pill", match: ["/doctor/medications"] },
     ],
   },
