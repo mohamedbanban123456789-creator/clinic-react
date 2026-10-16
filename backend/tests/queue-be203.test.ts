@@ -293,9 +293,11 @@ import { toggleEmergency, deferDocumentation } from '../src/modules/identity-que
   assert.equal(res.isEmergency, false, 'Entry must be unflagged');
   assert.equal(entry.isEmergency, false);
   assert.equal(writtenAudits.length, 1);
-  assert.equal(writtenAudits[0].action, 'EMERGENCY_UNFLAG');
-  assert.equal(writtenAudits[0].actorUserId, 'sec-b');
-  assert.equal(writtenAudits[0].actorRole, 'SECRETARY');
+  const unflagAudit = writtenAudits[0];
+  assert.ok(unflagAudit !== undefined);
+  assert.equal(unflagAudit.action, 'EMERGENCY_UNFLAG');
+  assert.equal(unflagAudit.actorUserId, 'sec-b');
+  assert.equal(unflagAudit.actorRole, 'SECRETARY');
 }
 
 // ---------------------------------------------------------------------------

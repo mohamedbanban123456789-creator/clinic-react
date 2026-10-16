@@ -28,6 +28,13 @@ import {
   formatPhone,
 } from "@/lib/format"
 import { invoiceStatusLabel, cessationReasonOptions } from "@/lib/constants"
+import type { DiagnosisEntryDto } from "@/api/types"
+
+const dxLabel = (d: DiagnosisEntryDto): string =>
+  typeof d === "string" ? d : `${d.name}${d.code ? ` (${d.code})` : ""}`
+
+const dxKey = (d: DiagnosisEntryDto, i: number): string =>
+  typeof d === "string" ? `${d}-${i}` : `${d.name}-${d.code ?? i}`
 import type { VaultNoteDto } from "@/api/types"
 
 function TimelineItem({
@@ -385,8 +392,8 @@ export default function PatientProfileScreen() {
                   </p>
                   <div className="timeline-tags">
                     <span>SOAP معتمد</span>
-                    {enc.diagnoses.slice(0, 2).map((d) => (
-                      <span key={d}>{d}</span>
+                    {enc.diagnoses.slice(0, 2).map((d, i) => (
+                      <span key={dxKey(d, i)}>{dxLabel(d)}</span>
                     ))}
                   </div>
                   <button
@@ -490,7 +497,7 @@ export default function PatientProfileScreen() {
                   <span>
                     <small>محور المتابعة</small>
                     <strong>
-                      {encounters[0]?.diagnoses[0] ?? "يحدد بعد أول تقرير"}
+                      {encounters[0] ? dxLabel(encounters[0].diagnoses[0] ?? "يحدد بعد أول تقرير") : "يحدد بعد أول تقرير"}
                     </strong>
                   </span>
                 </span>

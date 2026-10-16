@@ -752,8 +752,8 @@ function mockSettingsReq(role: 'DOCTOR' | 'SECRETARY'): Request {
   const addendumResult = await addEncounterAddendum(
     'enc-signed-1',
     {
-      note: 'Lab results reviewed: normal thyroid panel',
-      idempotencyKey: 'idemp-add-1',
+      reasonCode: 'OTHER',
+      text: 'Lab results reviewed: normal thyroid panel',
     },
     { userId: 'u-doc', role: 'DOCTOR' },
     db,

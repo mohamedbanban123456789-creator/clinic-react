@@ -257,7 +257,11 @@ async function runTests() {
     db,
   );
   const finalFetched = await getEncounter(created.encounterId, DOCTOR, db);
-  assert.equal(finalFetched.diagnoses[0]?.name, 'تشخيص مخصص من الطبيب بدون AI');
+  const firstDx = finalFetched.diagnoses[0] as unknown;
+  assert.equal(
+    typeof firstDx === 'string' ? firstDx : (firstDx as { name?: unknown })?.name,
+    'تشخيص مخصص من الطبيب بدون AI',
+  );
 
   console.log('All P2-4 Post-Session Diagnosis Tests passed successfully!');
 }

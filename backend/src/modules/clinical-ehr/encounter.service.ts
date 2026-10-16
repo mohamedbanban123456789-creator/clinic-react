@@ -135,6 +135,7 @@ export async function getEncounter(
   soap: { S: string | null; O: string | null; A: string | null; P: string | null };
   mse: { appearance: string; behavior: string; speechCoherence: string; moodAffect: string };
   diagnoses: string[];
+  diagnosisNotes: string | null;
   signedAt: string | null;
   signedByUserId: string | null;
   finalContentHash: string | null;
@@ -536,7 +537,9 @@ export async function runAiDiagnosisForEncounter(
   if (row === null) throw new AppError('NOT_FOUND', 'Encounter not found');
 
   const sections: string[] = [];
-  sections.push(`بيانات الحالة: المريض ${row.patient.fullName} (${row.patient.gender === 'FEMALE' ? 'أنثى' : 'ذكر'})`);
+  // NOTE: Patient rows carry no gender (gender lives on staff User rows for
+  // Arabic address forms) — never read row.patient.gender here.
+  sections.push(`بيانات الحالة: المريض ${row.patient.fullName}`);
   if (row.visitDate) sections.push(`تاريخ الزيارة: ${row.visitDate.toISOString().slice(0, 10)}`);
   if (row.encounterType) sections.push(`نوع المقابلة: ${row.encounterType}`);
   if (row.soapSubjective) sections.push(`الشكوى والقصة المرضية (S):\n${row.soapSubjective}`);
