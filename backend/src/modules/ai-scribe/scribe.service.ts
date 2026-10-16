@@ -350,15 +350,17 @@ export async function runCycle1Consultation(
               systemPrompt: CYCLE_1_ANALYSIS_PROMPT,
               cleanedText: cleaned.cleanedText,
             });
-      analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
-      transcript = {
-        raw,
-        cleaned: cleaned.cleanedText,
-        segments: cleaned.segments,
-        cleanedAt: new Date().toISOString(),
-        model: resolveGroqConfig().chatModel,
-        audioHash: sha256Hex(input.audioBase64),
-      };
+    analysis = parseCycleJson<Cycle1Analysis>(cycle1AnalysisSchema, rawJson);
+    transcript = {
+      raw,
+      cleaned: cleaned.cleanedText,
+      segments: cleaned.segments,
+      cleanedAt: new Date().toISOString(),
+      // With injected test stages there is no model to name; resolving the
+      // real config here would force a GROQ key in keyless test runs.
+      model: stages !== undefined ? 'mock' : resolveGroqConfig().chatModel,
+      audioHash: sha256Hex(input.audioBase64),
+    };
     } else {
       const generate = deps.generateContent;
       analysis = await analyzeConsultationAudio({
@@ -471,14 +473,14 @@ export async function runCycle2DoctorDecision(
         const ctx = await cleanupContext(db, session);
         const cleanedDecision =
           stages !== undefined ? await stages.cleanup(rawDecision, ctx) : await cleanupTranscript(rawDecision, ctx);
-        decisionTranscript = {
-          raw: rawDecision,
-          cleaned: cleanedDecision.cleanedText,
-          segments: cleanedDecision.segments,
-          cleanedAt: new Date().toISOString(),
-          model: resolveGroqConfig().chatModel,
-          audioHash,
-        };
+      decisionTranscript = {
+        raw: rawDecision,
+        cleaned: cleanedDecision.cleanedText,
+        segments: cleanedDecision.segments,
+        cleanedAt: new Date().toISOString(),
+        model: stages !== undefined ? 'mock' : resolveGroqConfig().chatModel,
+        audioHash,
+      };
         cleanedDecisionText = cleanedDecision.cleanedText;
       }
       const synthesisJson =
