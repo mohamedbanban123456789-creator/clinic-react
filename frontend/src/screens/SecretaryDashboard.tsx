@@ -17,6 +17,7 @@ import { settingsApi } from "@/api/admin"
 import { apiErrorMessage } from "@/api/client"
 import { AppButton, Icon, StatCard, useToast } from "@/components/ui"
 import { useAuth } from "@/auth/AuthContext"
+import { useCallRequest } from "@/realtime/socket"
 import {
   arGreeting,
   arNum,
@@ -214,6 +215,34 @@ export default function SecretaryDashboard() {
     onError: (err) => notify(apiErrorMessage(err), "error"),
   })
 
+  const approveCallMutation = useMutation({
+    mutationFn: (id: string) => queueApi.approveCallRequest(id),
+    onSuccess: (req) => {
+      notify(`المريض ${req.patientName} جاهز ودخل العيادة الآن`, "success")
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  const cancelCallMutation = useMutation({
+    mutationFn: (id: string) => queueApi.cancelCallRequest(id),
+    onSuccess: (req) => {
+      notify(`تم إلغاء استدعاء ${req.patientName}`)
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  useCallRequest((event) => {
+    if (event.type === "created") {
+      notify(`طلب استدعاء جديد من الطبيب: المريض ${event.payload.patientName} مطلوب بالداخل`)
+      invalidate()
+    } else if (event.type === "cancelled") {
+      notify(`تم إلغاء طلب استدعاء ${event.payload.patientName}`)
+      invalidate()
+    }
+  })
+
   const completeMutation = useMutation({
     mutationFn: (entry: QueueEntryDto) => queueApi.complete(entry.entryId),
     onSuccess: (entry) => {
@@ -322,6 +351,79 @@ export default function SecretaryDashboard() {
               </AppButton>
             )}
           </div>
+
+          {queue?.activeCallRequest && (
+            <div
+              className="call-request-banner"
+              style={{
+                background: "linear-gradient(135deg, rgba(101, 84, 217, 0.12), rgba(101, 84, 217, 0.05))",
+                border: "2px solid var(--color-primary, #6554D9)",
+                borderRadius: "14px",
+                padding: "16px 20px",
+                marginBottom: "20px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "16px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%",
+                    background: "var(--color-primary, #6554D9)",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Icon name="phone" size={20} />
+                </div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <strong style={{ fontSize: "16px", color: "var(--color-text-primary, #29264F)" }}>
+                      الدكتور مستني مريض
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        background: "var(--color-primary-soft, #EEEBFF)",
+                        color: "var(--color-primary, #6554D9)",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      طلب استدعاء نشط
+                    </span>
+                  </div>
+                  <p style={{ margin: "4px 0 0", fontSize: "14px", color: "var(--color-text-secondary, #55566F)" }}>
+                    المريض المطلوب: <strong style={{ color: "var(--color-primary, #6554D9)" }}>{queue.activeCallRequest.patientName}</strong> — يُرجى مناداته وتأكيد دخوله للكشف.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <AppButton
+                  variant="outline"
+                  onClick={() => cancelCallMutation.mutate(queue.activeCallRequest!.id)}
+                  disabled={cancelCallMutation.isPending || approveCallMutation.isPending}
+                >
+                  إلغاء الطلب
+                </AppButton>
+                <AppButton
+                  icon="check"
+                  onClick={() => approveCallMutation.mutate(queue.activeCallRequest!.id)}
+                  disabled={approveCallMutation.isPending}
+                >
+                  {approveCallMutation.isPending ? "جارٍ التحديث..." : "المريض جاهز"}
+                </AppButton>
+              </div>
+            </div>
+          )}
+
           <div className="queue-table">
             <div className="queue-head">
               <span>الترتيب</span>
@@ -499,6 +601,14 @@ export default function SecretaryDashboard() {
                       إقرار بالرصيد
                       <Icon name="arrow" size={15} />
                     </button>
+                  ) : queue?.activeCallRequest?.queueEntryId === patient.entryId ? (
+                    <AppButton
+                      icon="check"
+                      onClick={() => approveCallMutation.mutate(queue.activeCallRequest!.id)}
+                      disabled={approveCallMutation.isPending}
+                    >
+                      المريض جاهز
+                    </AppButton>
                   ) : actionable ? (
                     <button
                       className="row-action"

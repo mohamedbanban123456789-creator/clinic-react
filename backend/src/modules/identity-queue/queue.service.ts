@@ -3,14 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../common/prisma.js';
 import { AppError } from '../../common/errors/AppError.js';
 import { loadEnv } from '../../config/env.js';
-import { publishQueueSnapshot } from '../../common/realtime.js';
+import { broadcastCallRequest, publishQueueSnapshot } from '../../common/realtime.js';
 import { isUniqueViolation } from '../../common/db/unique-violation.js';
-import type { SecretSafe } from '../../common/types/secretSafe.js';
+import { markSecretSafe, type SecretSafe } from '../../common/types/secretSafe.js';
 import {
+  toSecretCallRequestDto,
   toSecretQueueEntryDto,
   toSecretQueueListDto,
   toSecretQueueReorderDto,
   toSecretWaitTimesDto,
+  type CallRequestDto,
   type DebtAlertDto,
   type QueueEntryDto,
   type QueueEntryRow,
@@ -48,6 +50,7 @@ import type {
   RequeueInput,
   UndoCompleteInput,
   WaitTimesQuery,
+  CreateCallRequestInput,
 } from './queue.validators.js';
 
 const UNDO_WINDOW_MIN = 15;
@@ -339,6 +342,32 @@ export async function listQueue(
     include: { patient: { select: { fullName: true } } },
   });
 
+  const pendingCall = await db.callRequest.findFirst({
+    where: {
+      queueEntry: { shiftId },
+      status: 'PENDING',
+    },
+    include: {
+      queueEntry: {
+        include: { patient: { select: { fullName: true } } },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const activeCallRequest: CallRequestDto | null = pendingCall
+    ? {
+        id: pendingCall.id,
+        queueEntryId: pendingCall.queueEntryId,
+        patientId: pendingCall.queueEntry.patientId,
+        patientName: pendingCall.queueEntry.patient.fullName,
+        requestedByUserId: pendingCall.requestedByUserId,
+        status: 'PENDING',
+        createdAt: pendingCall.createdAt.toISOString(),
+        updatedAt: pendingCall.updatedAt.toISOString(),
+      }
+    : null;
+
   const entries = rows.map((row) =>
     toSecretQueueEntryDto(toRow(row), {
       estimatedWaitMin:
@@ -348,7 +377,7 @@ export async function listQueue(
   );
 
   const headWait = entries.length > 0 ? entries[0]!.estimatedWaitMin : 0;
-  return toSecretQueueListDto(shiftId, queueVersion, headWait, entries);
+  return toSecretQueueListDto(shiftId, queueVersion, headWait, entries, activeCallRequest);
 }
 
 async function assertNoUnsignedDocumentation(shiftId: string, db: PrismaClient): Promise<void> {
@@ -554,6 +583,323 @@ export async function callEntry(
     estimatedWaitMin: 0,
     queueVersion: result.queueVersion,
   });
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/queue/call-request  [DOCTOR]  -> 200 SecretSafe<CallRequestDto>
+// P2-2: Secretary-mediated patient entry. Doctor creates a call request for
+// the target WAITING entry (or head of waiting pool).
+// ---------------------------------------------------------------------------
+export async function createCallRequest(
+  input: CreateCallRequestInput,
+  actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<SecretSafe<CallRequestDto>> {
+  const shift = await getOpenShiftOrThrow(db);
+  await assertNoUnsignedDocumentation(shift.id, db);
+
+  const current = await db.queueEntry.findFirst({
+    where: { shiftId: shift.id, status: 'IN_CONSULTATION' },
+  });
+  if (current !== null) {
+    throw new AppError('ACTIVE_CONSULTATION_EXISTS', 'A consultation is already active');
+  }
+
+  const existingPending = await db.callRequest.findFirst({
+    where: {
+      queueEntry: { shiftId: shift.id },
+      status: 'PENDING',
+    },
+  });
+  if (existingPending !== null) {
+    throw new AppError('PENDING_CALL_REQUEST_EXISTS', 'A call request is already pending');
+  }
+
+  let targetId = input.entryId;
+  if (!targetId) {
+    const pool = await loadOrderedWaitingPool(db, shift.id);
+    if (pool.length === 0) {
+      throw new AppError('NOT_FOUND', 'No WAITING entries to call');
+    }
+    targetId = pool[0]!.id;
+  }
+
+  const target = await db.queueEntry.findUnique({
+    where: { id: targetId },
+    include: { patient: { select: { fullName: true } } },
+  });
+  if (target === null || target.shiftId !== shift.id) {
+    throw new AppError('NOT_FOUND', 'Target queue entry not found in active shift');
+  }
+  if (normalizeQueueStatus(target.status) !== 'WAITING') {
+    throw new AppError('ILLEGAL_TRANSITION', 'Target patient is not WAITING');
+  }
+
+  const result = await runQueueTx(db, async (tx) => {
+    const created = await tx.callRequest.create({
+      data: {
+        queueEntryId: target.id,
+        requestedByUserId: actor.userId,
+        status: 'PENDING',
+      },
+      include: {
+        queueEntry: {
+          include: { patient: { select: { fullName: true } } },
+        },
+      },
+    });
+
+    await writeQueueAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CALL_REQUEST_CREATE',
+      entityId: created.id,
+      requestId: randomUUID(),
+      beforeState: { status: 'NONE' },
+      afterState: {
+        id: created.id,
+        queueEntryId: created.queueEntryId,
+        status: created.status,
+        patientName: created.queueEntry.patient.fullName,
+      },
+    });
+
+    const queueVersion = await bumpQueueVersion(tx, shift.id);
+    return { callRequest: created, queueVersion };
+  });
+
+  const dto: CallRequestDto = {
+    id: result.callRequest.id,
+    queueEntryId: result.callRequest.queueEntryId,
+    patientId: result.callRequest.queueEntry.patientId,
+    patientName: result.callRequest.queueEntry.patient.fullName,
+    requestedByUserId: result.callRequest.requestedByUserId,
+    status: 'PENDING',
+    createdAt: result.callRequest.createdAt.toISOString(),
+    updatedAt: result.callRequest.updatedAt.toISOString(),
+  };
+
+  broadcastCallRequest('call_request.created', dto);
+  publishQueueSnapshot(shift.id);
+
+  return toSecretCallRequestDto(dto);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/queue/call-request/:id/approve  [SECRETARY]  -> 200 SecretSafe<CallRequestDto>
+// P2-2: Secretary physically calls the patient and confirms readiness. Moves the
+// entry into IN_CONSULTATION and marks the CallRequest APPROVED.
+// ---------------------------------------------------------------------------
+export async function approveCallRequest(
+  callRequestId: string,
+  actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<SecretSafe<CallRequestDto>> {
+  const shift = await getOpenShiftOrThrow(db);
+
+  const callReq = await db.callRequest.findUnique({
+    where: { id: callRequestId },
+    include: {
+      queueEntry: {
+        include: { patient: { select: { fullName: true } } },
+      },
+    },
+  });
+  if (callReq === null) {
+    throw new AppError('CALL_REQUEST_NOT_FOUND', 'Call request not found');
+  }
+  if (callReq.status !== 'PENDING') {
+    throw new AppError('CALL_REQUEST_NOT_PENDING', 'Call request is not pending');
+  }
+  if (callReq.queueEntry.shiftId !== shift.id) {
+    throw new AppError('NOT_FOUND', 'Call request is not in the active shift');
+  }
+  if (normalizeQueueStatus(callReq.queueEntry.status) !== 'WAITING') {
+    throw new AppError('ILLEGAL_TRANSITION', 'Patient is no longer WAITING');
+  }
+
+  const current = await db.queueEntry.findFirst({
+    where: { shiftId: shift.id, status: 'IN_CONSULTATION' },
+  });
+  if (current !== null) {
+    throw new AppError('ACTIVE_CONSULTATION_EXISTS', 'A consultation is already active');
+  }
+
+  const result = await runQueueTx(db, async (tx) => {
+    const now = new Date();
+    const approved = await tx.callRequest.update({
+      where: { id: callReq.id },
+      data: { status: 'APPROVED' },
+      include: {
+        queueEntry: {
+          include: { patient: { select: { fullName: true } } },
+        },
+      },
+    });
+
+    assertLegalTransition(normalizeQueueStatus(callReq.queueEntry.status), 'IN_CONSULTATION');
+    const called = await tx.queueEntry.update({
+      where: { id: callReq.queueEntryId },
+      data: { status: 'IN_CONSULTATION', calledAt: now },
+      include: { patient: { select: { fullName: true } } },
+    });
+
+    await writeQueueAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CALL_REQUEST_APPROVE',
+      entityId: approved.id,
+      requestId: randomUUID(),
+      beforeState: { status: 'PENDING' },
+      afterState: { status: 'APPROVED' },
+    });
+
+    await writeQueueAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'QUEUE_CALL',
+      entityId: called.id,
+      requestId: randomUUID(),
+      beforeState: { status: 'WAITING' },
+      afterState: { status: 'IN_CONSULTATION' },
+    });
+
+    const queueVersion = await bumpQueueVersion(tx, shift.id);
+    return { callRequest: approved, queueVersion };
+  });
+
+  const dto: CallRequestDto = {
+    id: result.callRequest.id,
+    queueEntryId: result.callRequest.queueEntryId,
+    patientId: result.callRequest.queueEntry.patientId,
+    patientName: result.callRequest.queueEntry.patient.fullName,
+    requestedByUserId: result.callRequest.requestedByUserId,
+    status: 'APPROVED',
+    createdAt: result.callRequest.createdAt.toISOString(),
+    updatedAt: result.callRequest.updatedAt.toISOString(),
+  };
+
+  broadcastCallRequest('call_request.approved', dto);
+  publishQueueSnapshot(shift.id);
+
+  return toSecretCallRequestDto(dto);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/v1/queue/call-request/:id/cancel  [BOTH]  -> 200 SecretSafe<CallRequestDto>
+// P2-2: Doctor or Secretary cancels a pending call request.
+// ---------------------------------------------------------------------------
+export async function cancelCallRequest(
+  callRequestId: string,
+  actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<SecretSafe<CallRequestDto>> {
+  const shift = await getOpenShiftOrThrow(db);
+
+  const callReq = await db.callRequest.findUnique({
+    where: { id: callRequestId },
+    include: {
+      queueEntry: {
+        include: { patient: { select: { fullName: true } } },
+      },
+    },
+  });
+  if (callReq === null) {
+    throw new AppError('CALL_REQUEST_NOT_FOUND', 'Call request not found');
+  }
+  if (callReq.status !== 'PENDING') {
+    throw new AppError('CALL_REQUEST_NOT_PENDING', 'Call request is not pending');
+  }
+  if (callReq.queueEntry.shiftId !== shift.id) {
+    throw new AppError('NOT_FOUND', 'Call request is not in the active shift');
+  }
+
+  const result = await runQueueTx(db, async (tx) => {
+    const cancelled = await tx.callRequest.update({
+      where: { id: callReq.id },
+      data: { status: 'CANCELLED' },
+      include: {
+        queueEntry: {
+          include: { patient: { select: { fullName: true } } },
+        },
+      },
+    });
+
+    await writeQueueAudit(tx, {
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      action: 'CALL_REQUEST_CANCEL',
+      entityId: cancelled.id,
+      requestId: randomUUID(),
+      beforeState: { status: 'PENDING' },
+      afterState: { status: 'CANCELLED' },
+    });
+
+    const queueVersion = await bumpQueueVersion(tx, shift.id);
+    return { callRequest: cancelled, queueVersion };
+  });
+
+  const dto: CallRequestDto = {
+    id: result.callRequest.id,
+    queueEntryId: result.callRequest.queueEntryId,
+    patientId: result.callRequest.queueEntry.patientId,
+    patientName: result.callRequest.queueEntry.patient.fullName,
+    requestedByUserId: result.callRequest.requestedByUserId,
+    status: 'CANCELLED',
+    createdAt: result.callRequest.createdAt.toISOString(),
+    updatedAt: result.callRequest.updatedAt.toISOString(),
+  };
+
+  broadcastCallRequest('call_request.cancelled', dto);
+  publishQueueSnapshot(shift.id);
+
+  return toSecretCallRequestDto(dto);
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/queue/call-request/pending  [BOTH]  -> 200 SecretSafe<CallRequestDto> | null
+// ---------------------------------------------------------------------------
+export async function getPendingCallRequest(
+  _actor: ActorRef,
+  db: PrismaClient = prisma,
+): Promise<SecretSafe<CallRequestDto> | null> {
+  const shift = await db.shift.findFirst({
+    where: { status: 'OPEN' },
+    select: { id: true },
+  });
+  if (shift === null) {
+    return null;
+  }
+
+  const pending = await db.callRequest.findFirst({
+    where: {
+      queueEntry: { shiftId: shift.id },
+      status: 'PENDING',
+    },
+    include: {
+      queueEntry: {
+        include: { patient: { select: { fullName: true } } },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (pending === null) {
+    return null;
+  }
+
+  const dto: CallRequestDto = {
+    id: pending.id,
+    queueEntryId: pending.queueEntryId,
+    patientId: pending.queueEntry.patientId,
+    patientName: pending.queueEntry.patient.fullName,
+    requestedByUserId: pending.requestedByUserId,
+    status: 'PENDING',
+    createdAt: pending.createdAt.toISOString(),
+    updatedAt: pending.updatedAt.toISOString(),
+  };
+
+  return toSecretCallRequestDto(dto);
 }
 
 // ---------------------------------------------------------------------------

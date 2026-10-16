@@ -115,6 +115,17 @@ export interface DebtAlertDto {
   oldestInvoiceDate: string | null
 }
 
+export interface CallRequestDto {
+  id: string
+  queueEntryId: string
+  patientId: string
+  patientName: string
+  requestedByUserId: string
+  status: "PENDING" | "APPROVED" | "CANCELLED"
+  createdAt: string
+  updatedAt: string
+}
+
 export interface QueueEntryDto {
   entryId: string
   patientId: string
@@ -133,6 +144,7 @@ export interface QueueEntryDto {
   debtAckAt: string | null
   debtAlert: DebtAlertDto | null
   queueVersion: number
+  hasPendingCallRequest?: boolean
 }
 
 export interface QueueListDto {
@@ -140,6 +152,7 @@ export interface QueueListDto {
   queueVersion: number
   estimatedWaitMin: number
   entries: QueueEntryDto[]
+  activeCallRequest?: CallRequestDto | null
 }
 
 export interface WaitTimesDto {

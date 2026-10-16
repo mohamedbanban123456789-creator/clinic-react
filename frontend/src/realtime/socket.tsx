@@ -24,6 +24,7 @@ import {
 import { io, type Socket } from "socket.io-client"
 import { getAccessToken, setAccessToken, tryRefresh } from "@/api/client"
 import { useAuth } from "@/auth/AuthContext"
+import type { CallRequestDto } from "@/api/types"
 
 export interface QueueSnapshotEntry {
   entryId: string
@@ -38,6 +39,7 @@ export interface QueueSnapshotEntry {
   emergencyAckedAt?: string | null
   clinicalEncounterRef?: string | null
   calledAt?: string | null
+  hasPendingCallRequest?: boolean
 }
 
 export interface QueueSnapshot {
@@ -46,7 +48,15 @@ export interface QueueSnapshot {
   serverAt: string
   avgMinByKind: { regular: number; emergency: number }
   entries: QueueSnapshotEntry[]
+  activeCallRequest?: CallRequestDto | null
 }
+
+export interface CallRequestEvent {
+  type: "created" | "approved" | "cancelled"
+  payload: CallRequestDto
+}
+
+export type CallRequestListener = (event: CallRequestEvent) => void
 
 export interface IntercomReceivedPayload {
   id: string
@@ -64,6 +74,7 @@ type IntercomListener = (message: IntercomReceivedPayload) => void
 /** Module-level listener registries (stable across provider lifecycle). */
 const queueListeners = new Set<QueueListener>()
 const intercomListeners = new Set<IntercomListener>()
+const callRequestListeners = new Set<CallRequestListener>()
 
 /** Subscribe to live intercom messages (module-level, hook-free). */
 export function onIntercom(listener: IntercomListener): () => void {
@@ -71,10 +82,17 @@ export function onIntercom(listener: IntercomListener): () => void {
   return () => intercomListeners.delete(listener)
 }
 
+/** Subscribe to live call-request events (module-level, hook-free). */
+export function onCallRequest(listener: CallRequestListener): () => void {
+  callRequestListeners.add(listener)
+  return () => callRequestListeners.delete(listener)
+}
+
 interface RealtimeContextValue {
   connected: boolean
   onQueueSnapshot: (l: QueueListener) => () => void
   onIntercom: (l: IntercomListener) => () => void
+  onCallRequest: (l: CallRequestListener) => () => void
 }
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
@@ -116,6 +134,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
       socket.on("intercom.received", (message: IntercomReceivedPayload) => {
         intercomListeners.forEach((l) => l(message))
+      })
+
+      socket.on("call_request.created", (payload: CallRequestDto) => {
+        callRequestListeners.forEach((l) => l({ type: "created", payload }))
+      })
+      socket.on("call_request.approved", (payload: CallRequestDto) => {
+        callRequestListeners.forEach((l) => l({ type: "approved", payload }))
+      })
+      socket.on("call_request.cancelled", (payload: CallRequestDto) => {
+        callRequestListeners.forEach((l) => l({ type: "cancelled", payload }))
       })
 
       // Access token expired server-side: refresh then reconnect.
@@ -176,9 +204,19 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     return () => intercomListeners.delete(l)
   }, [])
 
+  const onCallRequestCb = useCallback((l: CallRequestListener) => {
+    callRequestListeners.add(l)
+    return () => callRequestListeners.delete(l)
+  }, [])
+
   const value = useMemo(
-    () => ({ connected, onQueueSnapshot, onIntercom: onIntercomCb }),
-    [connected, onQueueSnapshot, onIntercomCb],
+    () => ({
+      connected,
+      onQueueSnapshot,
+      onIntercom: onIntercomCb,
+      onCallRequest: onCallRequestCb,
+    }),
+    [connected, onQueueSnapshot, onIntercomCb, onCallRequestCb],
   )
 
   return (
@@ -200,4 +238,14 @@ export function useQueueSnapshot(handler: QueueListener): void {
   useEffect(() => {
     return onQueueSnapshot((snapshot) => ref.current(snapshot))
   }, [onQueueSnapshot])
+}
+
+/** Subscribe to live call requests. */
+export function useCallRequest(handler: CallRequestListener): void {
+  const { onCallRequest } = useRealtime()
+  const ref = useRef(handler)
+  ref.current = handler
+  useEffect(() => {
+    return onCallRequest((event) => ref.current(event))
+  }, [onCallRequest])
 }

@@ -7,9 +7,11 @@ import {
 } from '../src/modules/identity-queue/queue.state.js';
 import {
   abandonSchema,
-  checkInSchema,
   callNextSchema,
+  callRequestIdParamSchema,
   callSchema,
+  checkInSchema,
+  createCallRequestSchema,
   noShowSchema,
   requeueSchema,
   queueQuerySchema,
@@ -88,6 +90,9 @@ import { estimateWaitMin } from '../src/modules/identity-queue/queue.support.js'
     ['OUT_OF_ORDER_REASON_REQUIRED', 422],
     ['UNDO_WINDOW_EXPIRED', 400],
     ['UNDO_BLOCKED', 409],
+    ['PENDING_CALL_REQUEST_EXISTS', 409],
+    ['CALL_REQUEST_NOT_FOUND', 404],
+    ['CALL_REQUEST_NOT_PENDING', 409],
   ];
   for (const [code, status] of cases) {
     assert.equal(new AppError(code as never, 'x').statusCode, status, `${code} must be ${status}`);
@@ -112,6 +117,16 @@ import { estimateWaitMin } from '../src/modules/identity-queue/queue.support.js'
   assert.equal(callNextSchema.safeParse({}).success, true);
   assert.equal(callNextSchema.safeParse({ force: true }).success, true);
   assert.equal(callNextSchema.safeParse({ force: 'yes' }).success, false);
+
+  assert.equal(createCallRequestSchema.safeParse({}).success, true);
+  assert.equal(createCallRequestSchema.safeParse({ entryId: 'e1' }).success, true);
+  assert.equal(createCallRequestSchema.safeParse({ entryId: '' }).success, false);
+  assert.equal(createCallRequestSchema.safeParse({ entryId: 'e1', extra: 1 }).success, false); // strict
+
+  assert.equal(callRequestIdParamSchema.safeParse({ id: 'req-1' }).success, true);
+  assert.equal(callRequestIdParamSchema.safeParse({ id: '' }).success, false);
+  assert.equal(callRequestIdParamSchema.safeParse({}).success, false);
+  assert.equal(callRequestIdParamSchema.safeParse({ id: 'req-1', extra: 1 }).success, false); // strict
 
   assert.equal(callSchema.safeParse({}).success, true);
   assert.equal(callSchema.safeParse({ outOfOrderReasonCode: 'late-comer' }).success, true);

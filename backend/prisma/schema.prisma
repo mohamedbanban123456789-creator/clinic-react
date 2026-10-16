@@ -31,6 +31,12 @@ enum QueueStatus {
   ABANDONED
 }
 
+enum CallRequestStatus {
+  PENDING
+  APPROVED
+  CANCELLED
+}
+
 enum InvoiceStatus {
   UNPAID
   PARTIAL
@@ -142,6 +148,9 @@ enum AuditAction {
   PATIENT_FLAGGED_DUPLICATE
   QUEUE_CHECKIN
   QUEUE_CALL
+  CALL_REQUEST_CREATE
+  CALL_REQUEST_APPROVE
+  CALL_REQUEST_CANCEL
   QUEUE_SKIP
   QUEUE_REQUEUE
   QUEUE_COMPLETE
@@ -224,6 +233,7 @@ model User {
   vaultNotesCreated     TherapyNote[]        @relation("VaultCreator")
   scribeCreated         ScribeSession[]      @relation("ScribeCreator")
   auditEvents           AuditEvent[]         @relation("AuditActor")
+  callRequestsRequested CallRequest[]        @relation("CallRequester")
 
   @@index([role, isActive])
   @@map("users")
@@ -381,6 +391,7 @@ model QueueEntry {
   shift         Shift             @relation(fields: [shiftId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   invoice       Invoice?          @relation("QueueInvoice")
   intercomLinks IntercomMessage[] @relation("IntercomQueueLink")
+  callRequests  CallRequest[]
 
   @@unique([shiftId, idempotencyKey])
   @@index([shiftId, status, position])
@@ -388,6 +399,22 @@ model QueueEntry {
   @@index([clinicalEncounterRef])
   @@index([shiftId, emergencyFlaggedAt])
   @@map("queue_entries")
+}
+
+model CallRequest {
+  id                String            @id @default(cuid())
+  queueEntryId      String            @map("queue_entry_id")
+  requestedByUserId String            @map("requested_by_user_id")
+  status            CallRequestStatus @default(PENDING)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  queueEntry  QueueEntry @relation(fields: [queueEntryId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  requestedBy User       @relation("CallRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([queueEntryId, status])
+  @@index([status])
+  @@map("call_requests")
 }
 
 model Invoice {

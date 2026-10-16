@@ -8,7 +8,7 @@ import {
   estimateWaitMin,
   normalizeQueueStatus,
 } from './queue.support.js';
-import type { QueueEntryStatus } from './queue.dto.js';
+import type { CallRequestDto, QueueEntryStatus } from './queue.dto.js';
 
 /**
  * BE-401 canonical queue realtime snapshot (RPS-2 versioned snapshots).
@@ -39,6 +39,7 @@ export interface QueueSnapshotOpsEntry {
   readonly checkedInAt: string;
   readonly estimatedWaitMin: number;
   readonly queueVersion: number;
+  readonly hasPendingCallRequest?: boolean;
 }
 
 export interface QueueSnapshotOps {
@@ -47,6 +48,7 @@ export interface QueueSnapshotOps {
   readonly serverAt: string;
   readonly avgMinByKind: AvgMinByKind;
   readonly entries: readonly QueueSnapshotOpsEntry[];
+  readonly activeCallRequest?: CallRequestDto | null;
 }
 
 /** DOCTOR-facing entry (superset of ops — adds operational emergency/clinical-flag context). */
@@ -62,6 +64,7 @@ export interface QueueSnapshotDoctor {
   readonly serverAt: string;
   readonly avgMinByKind: AvgMinByKind;
   readonly entries: readonly QueueSnapshotDoctorEntry[];
+  readonly activeCallRequest?: CallRequestDto | null;
 }
 
 interface SnapshotRow {
@@ -137,6 +140,32 @@ export async function buildQueueSnapshots(
   const rows = await loadSnapshotRows(db, shift.id);
   const now = new Date().toISOString();
 
+  const pendingCall = await db.callRequest.findFirst({
+    where: {
+      queueEntry: { shiftId: shift.id },
+      status: 'PENDING',
+    },
+    include: {
+      queueEntry: {
+        include: { patient: { select: { fullName: true } } },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const activeCallRequest: CallRequestDto | null = pendingCall
+    ? {
+        id: pendingCall.id,
+        queueEntryId: pendingCall.queueEntryId,
+        patientId: pendingCall.queueEntry.patientId,
+        patientName: pendingCall.queueEntry.patient.fullName,
+        requestedByUserId: pendingCall.requestedByUserId,
+        status: 'PENDING',
+        createdAt: pendingCall.createdAt.toISOString(),
+        updatedAt: pendingCall.updatedAt.toISOString(),
+      }
+    : null;
+
   const inConsultation = rows.some((r) => normalizeQueueStatus(r.entry.status) === 'IN_CONSULTATION');
   const activeCalledAt =
     rows.find((r) => normalizeQueueStatus(r.entry.status) === 'IN_CONSULTATION')?.entry.calledAt ?? null;
@@ -165,6 +194,8 @@ export async function buildQueueSnapshots(
         : 0;
     if (status === 'WAITING') preceding += 1;
 
+    const hasPendingCallRequest = pendingCall !== null && pendingCall.queueEntryId === entry.id;
+
     const base: QueueSnapshotOpsEntry = {
       entryId: entry.id,
       patientId: entry.patientId,
@@ -175,6 +206,7 @@ export async function buildQueueSnapshots(
       checkedInAt: entry.checkedInAt.toISOString(),
       estimatedWaitMin,
       queueVersion: shift.queueVersion,
+      hasPendingCallRequest,
     };
 
     opsEntries.push(base);
@@ -192,6 +224,7 @@ export async function buildQueueSnapshots(
     serverAt: now,
     avgMinByKind,
     entries: opsEntries,
+    activeCallRequest,
   });
 
   const doctor: QueueSnapshotDoctor = {
@@ -200,6 +233,7 @@ export async function buildQueueSnapshots(
     serverAt: now,
     avgMinByKind,
     entries: doctorEntries,
+    activeCallRequest,
   };
 
   return { ops, doctor };

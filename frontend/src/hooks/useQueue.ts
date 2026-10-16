@@ -27,6 +27,7 @@ function snapshotToQueueList(snapshot: QueueSnapshot): QueueListDto {
     shiftId: snapshot.clinicDayId,
     queueVersion: snapshot.queueVersion,
     estimatedWaitMin: waitingFirst ? Math.round(waitingFirst.estimatedWaitMin) : 0,
+    activeCallRequest: snapshot.activeCallRequest ?? null,
     entries: snapshot.entries.map((e) => ({
       entryId: e.entryId,
       patientId: e.patientId,
@@ -45,6 +46,8 @@ function snapshotToQueueList(snapshot: QueueSnapshot): QueueListDto {
       debtAckAt: null,
       debtAlert: null,
       queueVersion: e.queueVersion,
+      hasPendingCallRequest:
+        e.hasPendingCallRequest ?? (snapshot.activeCallRequest?.queueEntryId === e.entryId),
     })),
   }
 }

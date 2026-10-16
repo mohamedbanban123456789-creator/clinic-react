@@ -41,11 +41,27 @@ export interface QueueEntryDto {
   readonly queueVersion: number;
 }
 
+export interface CallRequestDto {
+  readonly id: string;
+  readonly queueEntryId: string;
+  readonly patientId: string;
+  readonly patientName: string;
+  readonly requestedByUserId: string;
+  readonly status: 'PENDING' | 'APPROVED' | 'CANCELLED';
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export function toSecretCallRequestDto(data: CallRequestDto): SecretSafe<CallRequestDto> {
+  return markSecretSafe<CallRequestDto>(data);
+}
+
 export interface QueueListDto {
   readonly shiftId: string | null;
   readonly queueVersion: number;
   readonly estimatedWaitMin: number;
   readonly entries: readonly QueueEntryDto[];
+  readonly activeCallRequest?: CallRequestDto | null;
 }
 
 /** DB row shape consumed by the mapper (operational projection only). */
@@ -104,12 +120,14 @@ export function toSecretQueueListDto(
   queueVersion: number,
   estimatedWaitMin: number,
   entries: readonly SecretSafe<QueueEntryDto>[],
+  activeCallRequest?: CallRequestDto | null,
 ): SecretSafe<QueueListDto> {
   return markSecretSafe<QueueListDto>({
     shiftId,
     queueVersion,
     estimatedWaitMin,
     entries,
+    activeCallRequest: activeCallRequest ?? null,
   });
 }
 

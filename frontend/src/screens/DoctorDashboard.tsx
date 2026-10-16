@@ -17,6 +17,7 @@ import { patientsApi } from "@/api/patients"
 import { apiErrorMessage, ApiError } from "@/api/client"
 import { AppButton, Icon, Modal, StatCard, useToast } from "@/components/ui"
 import { FloatingChat } from "@/components/Conversation"
+import { useCallRequest } from "@/realtime/socket"
 import { arNum, arTimer, arDate, ageFromDob, arAgo, moneyMinor } from "@/lib/format"
 import { emergencyReasonLabel } from "@/lib/constants"
 import type { UnsignedNotesDto, QueueEntryDto } from "@/api/types"
@@ -195,7 +196,7 @@ export default function DoctorDashboard() {
   const navigate = useNavigate()
   const { notify } = useToast()
   const queryClient = useQueryClient()
-  const { entries, isLoading, queueVersion } = useQueue()
+  const { queue, entries, isLoading, queueVersion } = useQueue()
   const invalidate = useQueueInvalidation()
   const [chatOpen, setChatOpen] = useState(false)
   const [showComplimentary, setShowComplimentary] = useState(false)
@@ -248,9 +249,44 @@ export default function DoctorDashboard() {
   })
 
   const handleOpenCallReview = () => {
-    if (waiting.length === 0) return
+    if (waiting.length === 0 || queue?.activeCallRequest) return
     setPendingCallPatient(waiting[0])
   }
+
+  const createCallRequestMutation = useMutation({
+    mutationFn: (opts?: { entryId?: string }) => queueApi.createCallRequest(opts?.entryId),
+    onSuccess: (req) => {
+      notify(`تم إرسال طلب استدعاء للمريض ${req.patientName} إلى السكرتارية`)
+      setPendingCallPatient(null)
+      invalidate()
+    },
+    onError: (err) => {
+      const msg = apiErrorMessage(err)
+      notify(msg, "error")
+      if ((err as ApiError)?.code === "DOCUMENTATION_REQUIRED" || msg.includes("توثيق")) {
+        setShowReviewModal(true)
+      }
+    },
+  })
+
+  const cancelCallRequestMutation = useMutation({
+    mutationFn: (id: string) => queueApi.cancelCallRequest(id),
+    onSuccess: (req) => {
+      notify(`تم إلغاء طلب استدعاء ${req.patientName}`)
+      invalidate()
+    },
+    onError: (err) => notify(apiErrorMessage(err), "error"),
+  })
+
+  useCallRequest((event) => {
+    if (event.type === "approved") {
+      notify(`المريض ${event.payload.patientName} جاهز وداخل العيادة الآن`, "success")
+      invalidate()
+    } else if (event.type === "cancelled") {
+      notify(`تم إلغاء طلب استدعاء ${event.payload.patientName}`)
+      invalidate()
+    }
+  })
 
   const callNextMutation = useMutation({
     mutationFn: () => queueApi.callNext(),
@@ -348,9 +384,17 @@ export default function DoctorDashboard() {
               <AppButton
                 icon="phone"
                 onClick={handleOpenCallReview}
-                disabled={callNextMutation.isPending || waiting.length === 0}
+                disabled={
+                  Boolean(queue?.activeCallRequest) ||
+                  createCallRequestMutation.isPending ||
+                  waiting.length === 0
+                }
               >
-                {callNextMutation.isPending ? "جارٍ الاستدعاء..." : "استدعاء المريض التالي"}
+                {queue?.activeCallRequest
+                  ? "بانتظار دخول المريض..."
+                  : createCallRequestMutation.isPending
+                    ? "جارٍ إرسال الطلب..."
+                    : "طلب المريض التالي"}
               </AppButton>
             )}
           </div>
@@ -415,11 +459,56 @@ export default function DoctorDashboard() {
             <AppButton
               icon="phone"
               onClick={handleOpenCallReview}
-              disabled={callNextMutation.isPending || waiting.length === 0}
+              disabled={
+                Boolean(queue?.activeCallRequest) ||
+                createCallRequestMutation.isPending ||
+                waiting.length === 0
+              }
             >
-              استدعاء التالي
+              {queue?.activeCallRequest ? "بانتظار الدخول..." : "طلب التالي"}
             </AppButton>
           </div>
+
+          {queue?.activeCallRequest && (
+            <div
+              style={{
+                background: "var(--color-primary-soft, #EEEBFF)",
+                border: "1px solid var(--color-primary, #6554D9)",
+                borderRadius: "12px",
+                padding: "14px 18px",
+                marginBottom: "16px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <Icon name="phone" size={18} />
+                <div>
+                  <strong style={{ color: "var(--color-text-primary, #29264F)", fontSize: "14px" }}>
+                    الدكتور مستني مريض ({queue.activeCallRequest.patientName})
+                  </strong>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      fontSize: "13px",
+                      color: "var(--color-text-secondary, #55566F)",
+                    }}
+                  >
+                    تم إرسال الطلب إلى السكرتارية. بانتظار تجهيز المريض وتأكيد دخوله للعيادة...
+                  </p>
+                </div>
+              </div>
+              <AppButton
+                variant="outline"
+                onClick={() => cancelCallRequestMutation.mutate(queue.activeCallRequest!.id)}
+                disabled={cancelCallRequestMutation.isPending}
+              >
+                إلغاء الطلب
+              </AppButton>
+            </div>
+          )}
           {isLoading && <p>جارٍ تحميل الطابور…</p>}
           {!isLoading && waiting.length === 0 && (
             <p>لا مرضى في الانتظار — سيظهر القادمون هنا تلقائيًا.</p>
@@ -692,12 +781,11 @@ export default function DoctorDashboard() {
               <AppButton
                 icon="phone"
                 onClick={() => {
-                  setPendingCallPatient(null)
-                  callNextMutation.mutate()
+                  createCallRequestMutation.mutate({ entryId: pendingCallPatient.entryId })
                 }}
-                disabled={callNextMutation.isPending}
+                disabled={createCallRequestMutation.isPending}
               >
-                {callNextMutation.isPending ? "جارٍ الاستدعاء..." : "استدعاء المريض الآن"}
+                {createCallRequestMutation.isPending ? "جارٍ إرسال الطلب..." : "طلب المريض التالي"}
               </AppButton>
             </div>
           </div>

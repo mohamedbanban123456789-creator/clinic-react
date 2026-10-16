@@ -85,6 +85,20 @@ export function broadcastIntercom(frame: unknown): void {
   io.to('clinic:intercom').emit('intercom.received', frame);
 }
 
+/** Broadcast a call_request event to clinic queue rooms. */
+export function broadcastCallRequest(
+  event: 'call_request.created' | 'call_request.approved' | 'call_request.cancelled',
+  payload: unknown,
+): void {
+  if (io === null) return;
+  try {
+    io.to('clinic:queue:ops').emit(event, payload);
+    io.to('clinic:queue:doctor').emit(event, payload);
+  } catch (err) {
+    logger.warn('realtime.callRequest.failed', { event, err: String(err) });
+  }
+}
+
 /** Emit a server→client frame to a single socket (used by WS handlers). */
 export function emitToSocket(socket: Socket, event: string, frame: unknown): void {
   socket.emit(event, frame);
