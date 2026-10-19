@@ -122,6 +122,54 @@ a:focus-visible, [tabindex]:focus-visible {
 
 .icon { flex: 0 0 auto; }
 
+/* =====================================================================
+   Fluid interaction foundation (Apple fluid interfaces)
+   Pairs with src/clinic/motion/* — springs, RTL variants, gestures.
+   ===================================================================== */
+
+/* Instant press feedback: responds on pointer-DOWN, not release.
+   100ms ease-out scale echo — identical contract to `pressable`
+   variant in motion/variants.ts. */
+.pressable {
+  transition: transform 100ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* kills the legacy 300ms tap delay */
+  will-change: transform;
+}
+.pressable:active { transform: scale(0.98); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pressable { transition: none; will-change: auto; }
+  .pressable:active { transform: none; }
+}
+
+/* Transparency preferences — solid, calm fallbacks (no backdrop-filter,
+   no translucent stacking). Glass becomes matte navy. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong,
+  .glass-tile,
+  .glass-pill,
+  .floating-chat {
+    background: var(--page-bg-fallback) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .modal-backdrop {
+    background: oklch(0.11 0.02 250 / 0.9) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+/* Drag surfaces (RTL drawers/sheets): the browser must not steal
+   horizontal pans for history navigation while a sheet is tracked. */
+.drag-x {
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Scrollbars (dark, neutral) */
 * { scrollbar-width: thin; scrollbar-color: oklch(1 0 0 / 0.28) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }

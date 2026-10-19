@@ -199,3 +199,49 @@ Stage Summary:
 - Deliverables: download/review3/ (5 before, 14 after, 5 comparisons),
   scripts/make_review3_comparisons.py
 - Working credentials unchanged: doctor / Doctor2026!, secretary / Secretary2026!
+
+---
+Task ID: 8
+Agent: main (Super Z)
+Task: Apple fluid-interfaces phase — confirm design contract, build motion
+system foundation (springs/gestures/variants + CSS layer) before owner
+sends component code for refactor
+
+Work Log:
+- Grounded in project state: RTL html[dir=rtl] ✓, IBM Plex Sans Arabic
+  300-700 + line-height 1.7 already in globals.css ✓, framer-motion
+  12.23.2 installed but ZERO imports anywhere (all motion was CSS-only;
+  40 transition/keyframe rules) — spring layer was the missing piece
+- Created src/clinic/motion/ module:
+  * springs.ts — 5 approved springs (calm/sheet/momentum/spacious/micro,
+    bounce:0 except momentum 0.15), TWEENS (press 100ms, exit, fade),
+    project() momentum math, rubberband(), nearestSnap()
+  * gestures.ts — createVelocityTracker (windowed pointer history),
+    attachPointerDrag (setPointerCapture, grab-offset, rubber-band
+    bounds, velocity handoff), useCalmTransition, useEdgeDrawer (RTL
+    right-anchored drawer: 1:1 drag, flick projection, velocity-seeded
+    spring settle, dragControls handle-only, reduced-motion bailout)
+  * variants.ts — RTL-mirrored variants: fromEdge/sheetRight (in from
+    RIGHT, out to RIGHT — symmetric path), rise/fade/modalCenter
+    (scale+fade condensing), listStagger/denseStagger, pressable
+    (whileTap 0.98 + 100ms), revealOnScroll (once:true)
+  * index.ts — barrel + the 11-point contract documented
+- ClinicRoot.tsx: wrapped app in <MotionConfig reducedMotion="user"
+  transition={SPRINGS.calm}> — global default spring + auto reduced-motion
+- globals.css additions: .pressable (pointerdown scale 0.98, 100ms
+  ease-out, tap-highlight off, touch-action:manipulation), FIRST-EVER
+  prefers-reduced-transparency fallbacks (glass/glass-strong/glass-tile/
+  glass-pill/floating-chat -> solid page-bg, modal-backdrop solid),
+  .drag-x (touch-action:pan-y so horizontal pans aren't stolen by
+  browser history navigation during sheet drags)
+- Validated: tsc --noEmit scoped to src/ = 0 errors (upload/skills/
+  examples vendored dirs excluded as in all prior QA); dev server boots,
+  GET / 200, rtl page intact
+
+Stage Summary:
+- Motion system foundation is LIVE in the codebase and importable as
+  `@/clinic/motion` — awaiting owner's component/page code to refactor
+- Design contract understood: damping 1.0 default / bounce only after
+  flick / RTL mirrored spatial paths / no letter-spacing on Arabic /
+  calm restraint for mental-health context
+- No screen has been touched yet — refactor starts when code arrives
