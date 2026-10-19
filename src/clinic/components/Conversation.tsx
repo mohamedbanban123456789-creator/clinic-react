@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AnimatePresence, motion } from "framer-motion"
 import { intercomApi } from "@/clinic/api/intercom"
 import { apiErrorMessage } from "@/clinic/api/client"
 import type { IntercomMessageDto } from "@/clinic/api/types"
@@ -24,6 +25,7 @@ import {
   tSec,
   type IntercomType,
 } from "@/clinic/lib/constants"
+import { fromEdge, SPRINGS, TWEENS } from "@/clinic/motion"
 
 export function Conversation({
   expanded = false,
@@ -167,12 +169,18 @@ export function Conversation({
           const mine = m.fromUserId === user?.id
           const body = m.text ?? intercomTypeLabel[m.type as IntercomType] ?? m.type
           return (
-            <div className={mine ? "message mine" : "message"} key={m.id}>
+            <motion.div
+              className={mine ? "message mine" : "message"}
+              key={m.id}
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={SPRINGS.micro}
+            >
               <p>{body}</p>
               <small>
                 {arTime(m.createdAt)} · {m.fromRole === "DOCTOR" ? "الطبيب/ة" : "الاستقبال"}
               </small>
-            </div>
+            </motion.div>
           )
         })}
       </div>
@@ -195,9 +203,16 @@ export function Conversation({
           onKeyDown={(e) => e.key === "Enter" && send()}
           disabled={sendMutation.isPending}
         />
-        <button onClick={() => send()} disabled={sendMutation.isPending || !text.trim()}>
+        <motion.button
+          onClick={() => send()}
+          disabled={sendMutation.isPending || !text.trim()}
+          whileTap={{ scale: 0.9 }}
+          whileHover={{ scale: 1.06 }}
+          transition={TWEENS.press}
+          aria-label="إرسال"
+        >
           <Icon name="send" size={18} />
-        </button>
+        </motion.button>
       </div>
     </div>
   )
@@ -226,30 +241,50 @@ export function FloatingChat({
 
   return (
     <div className={open ? "floating-chat open" : "floating-chat"}>
-      {open && (
-        <div className="floating-panel">
-          <button
-            type="button"
-            className="close-chat"
-            onClick={() => setOpen(false)}
-            aria-label="إغلاق المحادثة"
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="floating-panel"
+            variants={fromEdge}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
           >
-            ×
-          </button>
-          <Conversation onComplimentary={onComplimentary} />
-        </div>
-      )}
-      <button
+            <button
+              type="button"
+              className="close-chat"
+              onClick={() => setOpen(false)}
+              aria-label="إغلاق المحادثة"
+            >
+              ×
+            </button>
+            <Conversation onComplimentary={onComplimentary} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <motion.button
         type="button"
         className="chat-toggle"
         onClick={() => chatContext.toggleChat()}
         aria-label="المحادثة الفورية"
+        whileTap={{ scale: 0.95 }}
+        transition={TWEENS.press}
       >
         <Icon name="message" />
         <span>{partnerLabel}</span>
-        {unreadCount > 0 && <span className="chat-badge">{unreadCount}</span>}
+        {unreadCount > 0 && (
+          <motion.span
+            key={unreadCount}
+            className="chat-badge"
+            initial={{ scale: 0.4, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={SPRINGS.micro}
+          >
+            {unreadCount}
+          </motion.span>
+        )}
         <i />
-      </button>
+      </motion.button>
     </div>
   )
 }

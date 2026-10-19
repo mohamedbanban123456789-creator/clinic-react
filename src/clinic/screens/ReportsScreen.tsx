@@ -8,6 +8,8 @@
 
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger } from "@/clinic/motion"
 import {
   CartesianGrid,
   Line,
@@ -145,7 +147,12 @@ export default function ReportsScreen() {
           )}
           {latestClosed && (
             <>
-              <section className="stats-grid four">
+              <motion.section
+                className="stats-grid four"
+                variants={listStagger}
+                initial="hidden"
+                animate="visible"
+              >
                 <StatCard
                   label="إجمالي محصل"
                   value={arNum(gross / 100)}
@@ -183,7 +190,7 @@ export default function ReportsScreen() {
                   icon="check"
                   tone={cash?.reconciliationPassed ? "mint" : "coral"}
                 />
-              </section>
+              </motion.section>
 
               <section className="card report-chart">
                 <div className="card-header">

@@ -12,6 +12,8 @@
 import { useMemo, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { ehrApi } from "@/clinic/api/ehr"
 import { patientsApi } from "@/clinic/api/patients"
 import { queueApi } from "@/clinic/api/queue"
@@ -166,8 +168,13 @@ export default function MedicationsScreen() {
     const waitingPatients = entries.filter((e) => e.status === "WAITING")
     const inRoom = entries.find((e) => e.status === "IN_CONSULTATION")
     return (
-      <div className="med-bento">
-        <section className="card med-patient bento-main">
+      <motion.div
+        className="med-bento"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="card med-patient bento-main" variants={rise}>
           <div className="patient-heading compact">
             <span className="patient-avatar large">؟</span>
             <div>
@@ -189,10 +196,10 @@ export default function MedicationsScreen() {
               الجلسة الجارية: {inRoom.displayName} — افتح خطته الآن
             </button>
           )}
-        </section>
+        </motion.section>
 
-        <aside className="side-stack bento-side">
-          <section className="card">
+        <motion.aside className="side-stack bento-side" variants={rise}>
+          <motion.section className="card" variants={rise}>
             <div className="card-header">
               <div>
                 <span className="section-kicker">مباشر الآن</span>
@@ -222,9 +229,9 @@ export default function MedicationsScreen() {
                 </button>
               ))}
             </div>
-          </section>
+          </motion.section>
 
-          <section className="card">
+          <motion.section className="card" variants={rise}>
             <div className="card-header">
               <div>
                 <span className="section-kicker">مساعدة سريعة</span>
@@ -245,16 +252,21 @@ export default function MedicationsScreen() {
                 لا يوجد فحص تعارضات آلي — راجع التعارضات بنفسك قبل أي إضافة.
               </li>
             </ul>
-          </section>
-        </aside>
-      </div>
+          </motion.section>
+        </motion.aside>
+      </motion.div>
     )
   }
 
   return (
-    <div className="med-layout">
+    <motion.div
+      className="med-layout"
+      variants={listStagger}
+      initial="hidden"
+      animate="visible"
+    >
       <section className="med-main">
-        <div className="card med-patient">
+        <motion.div className="card med-patient" variants={rise}>
           <div className="patient-heading compact">
             <span className="patient-avatar large">{patientName.charAt(0)}</span>
             <div>
@@ -269,9 +281,9 @@ export default function MedicationsScreen() {
           <AppButton icon="plus" onClick={() => setShowAdd(true)}>
             إضافة دواء
           </AppButton>
-        </div>
+        </motion.div>
 
-        <section className="card medication-list">
+        <motion.section className="card medication-list" variants={rise}>
           <div className="card-header">
             <div>
               <span className="section-kicker">نشط الآن</span>
@@ -299,9 +311,9 @@ export default function MedicationsScreen() {
               onDiscontinue={() => setStopMed(med)}
             />
           ))}
-        </section>
+        </motion.section>
 
-        <section className="card medication-list discontinued">
+        <motion.section className="card medication-list discontinued" variants={rise}>
           <div className="card-header">
             <div>
               <span className="section-kicker">السجل السابق</span>
@@ -338,11 +350,11 @@ export default function MedicationsScreen() {
               </div>
             </div>
           ))}
-        </section>
+        </motion.section>
       </section>
 
-      <aside className="side-stack">
-        <section className="card safety-card">
+      <motion.aside className="side-stack" variants={listStagger}>
+        <motion.section className="card safety-card" variants={rise}>
           <div className="safety-icon">
             <Icon name="heart" />
           </div>
@@ -358,8 +370,8 @@ export default function MedicationsScreen() {
               <small>حد الخدمة الحالي في النظام</small>
             </span>
           </div>
-        </section>
-        <section className="card med-history">
+        </motion.section>
+        <motion.section className="card med-history" variants={rise}>
           <h3>ملخص السجل</h3>
           <span>
             <small>أدوية حالية</small>
@@ -373,8 +385,8 @@ export default function MedicationsScreen() {
             <small>آخر تحديث</small>
             <b>{lastUpdate ? arDate(lastUpdate) : "—"}</b>
           </span>
-        </section>
-      </aside>
+        </motion.section>
+      </motion.aside>
 
       {showAdd && (
         <Modal
@@ -557,6 +569,6 @@ export default function MedicationsScreen() {
           </form>
         </Modal>
       )}
-    </div>
+    </motion.div>
   )
 }

@@ -11,6 +11,8 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useQueue } from "@/clinic/hooks/useQueue"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { Icon, useToast } from "@/clinic/components/ui"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { arNum, arToday, arTime } from "@/clinic/lib/format"
@@ -87,9 +89,19 @@ export default function DisplayScreen() {
               <small>سيظهر الطابور هنا تلقائيًا فور تسجيل الحضور في الاستقبال</small>
             </div>
           )}
-          <div className="display-grid">
+          <motion.div
+            className="display-grid"
+            variants={listStagger}
+            initial="hidden"
+            animate="visible"
+          >
             {waiting.slice(0, 8).map((e, i) => (
-              <div className="display-tile" key={e.entryId}>
+              <motion.div
+                className="display-tile"
+                key={e.entryId}
+                layout
+                variants={rise}
+              >
                 <strong>{arNum(i + 1)}</strong>
                 {!privacy && <span>{e.displayName}</span>}
                 {e.isEmergency && (
@@ -98,9 +110,9 @@ export default function DisplayScreen() {
                   </span>
                 )}
                 <small>نحو {arNum(e.estimatedWaitMin)} دقيقة</small>
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </section>
       </main>
 

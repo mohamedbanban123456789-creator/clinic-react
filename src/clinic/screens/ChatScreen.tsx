@@ -7,6 +7,8 @@
 
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { Conversation } from "@/clinic/components/Conversation"
 import { intercomApi } from "@/clinic/api/intercom"
 import { billingApi } from "@/clinic/api/billing"
@@ -125,15 +127,15 @@ export default function ChatScreen() {
 
   return (
     <>
-      <div className="chat-page card">
+      <motion.div className="chat-page card" variants={rise}>
         <Conversation
           expanded
           onComplimentary={() => setShowComplimentary(true)}
           onFollowUp={() => setShowFollowUp(true)}
         />
-      </div>
+      </motion.div>
 
-      <section className="card archive-card" style={{ marginTop: "16px" }}>
+      <motion.section className="card archive-card" style={{ marginTop: "16px" }} variants={rise}>
         <div className="card-header">
           <div>
             <span className="section-kicker">مهام المتابعة</span>
@@ -202,7 +204,7 @@ export default function ChatScreen() {
             </div>
           ))}
         </div>
-      </section>
+      </motion.section>
 
       {showComplimentary && (
         <PickEntryModal

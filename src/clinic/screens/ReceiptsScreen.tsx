@@ -12,6 +12,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { rise } from "@/clinic/motion"
 import { billingApi } from "@/clinic/api/billing"
 import { patientsApi } from "@/clinic/api/patients"
 import { apiErrorMessage } from "@/clinic/api/client"
@@ -241,7 +243,7 @@ export default function ReceiptsScreen() {
   const searchCandidates = patientSearchQuery.data?.data ?? []
 
   return (
-    <section className="card archive-card">
+    <motion.section className="card archive-card" variants={rise}>
       <div className="card-header">
         <div>
           <span className="section-kicker">السجل المالي</span>
@@ -382,7 +384,7 @@ export default function ReceiptsScreen() {
           onClose={() => setSelected(null)}
         />
       )}
-    </section>
+    </motion.section>
   )
 }
 

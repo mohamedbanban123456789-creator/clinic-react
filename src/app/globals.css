@@ -415,7 +415,7 @@ a:focus-visible, [tabindex]:focus-visible {
   transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .nav-item:hover { background: oklch(1 0 0 / 0.1); color: var(--text-strong); }
-.nav-item:active { transform: scale(0.98); }
+/* Press feedback on nav items is owned by framer whileTap (100ms) */
 .nav-item.active {
   background: linear-gradient(160deg, oklch(1 0 0 / 0.25) 0%, oklch(1 0 0 / 0.08) 100%);
   backdrop-filter: blur(12px) saturate(180%);
@@ -429,7 +429,20 @@ a:focus-visible, [tabindex]:focus-visible {
     inset 0 -1px 1px 0 oklch(0 0 0 / 0.2),
     0 12px 28px -10px oklch(0.08 0.04 220 / 0.65);
 }
-.nav-item.active i, .nav-item i { display: none; }
+/* Active-route indicator — the layoutId shared element that physically
+   slides between nav items as the route changes. No transform here (the
+   layout projection owns geometry), top/bottom insets center it. */
+.nav-indicator {
+  position: absolute;
+  inset-inline-start: -1px;
+  top: 11px;
+  bottom: 11px;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, oklch(0.72 0.11 190) 0%, oklch(0.58 0.11 192) 100%);
+  box-shadow: 0 0 12px oklch(0.72 0.11 190 / 0.55);
+  pointer-events: none;
+}
 
 .sidebar-profile {
   flex-shrink: 0;
@@ -479,7 +492,7 @@ a:focus-visible, [tabindex]:focus-visible {
     inset 0 1px 1.5px 0 oklch(1 0 0 / 0.7),
     inset 0 -1px 1px 0 oklch(0 0 0 / 0.2),
     0 12px 28px -10px oklch(0.08 0.04 220 / 0.65);
-  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease, transform 0.15s ease;
+  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s ease, transform 100ms ease-out;
 }
 .icon-button:hover { background: linear-gradient(160deg, oklch(1 0 0 / 0.35) 0%, oklch(1 0 0 / 0.14) 100%); color: var(--text-strong); }
 .icon-button:active { transform: scale(0.97); }
@@ -634,7 +647,7 @@ a:focus-visible, [tabindex]:focus-visible {
   gap: 8px;
   font-weight: 700;
   font-size: 15px;
-  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, transform 0.15s ease, opacity 0.15s ease, filter 0.2s ease;
+  transition: background 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, transform 100ms ease-out, opacity 0.15s ease, filter 0.2s ease;
 }
 .btn:hover:not(:disabled) { transform: translateY(-1px); }
 .btn:active:not(:disabled) { transform: scale(0.97); }
@@ -984,9 +997,9 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   border-radius: 34px;
   box-shadow: var(--glass-shadow);
   padding: 24px;
-  animation: modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Entrance/exit is owned by framer-motion (modalCenter variant) — no
+     CSS keyframes here, they would double-animate the transform. */
 }
-@keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
 /* Danger variant — rose-topped liquid glass (ZIP 2 panic dialog) */
 .modal.danger-modal { border-top-color: oklch(0.85 0.09 22 / 0.45); }
 .modal.danger-modal .modal-header > button { border-color: oklch(0.85 0.09 22 / 0.4); color: oklch(0.97 0.04 22); }
@@ -1037,7 +1050,7 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
   display: flex; align-items: center; gap: 10px;
   font-size: 14px;
   font-weight: 600;
-  animation: toast-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Entrance/exit owned by framer-motion (ToastProvider) */
   max-width: min(520px, 92vw);
 }
 .toast-check {
@@ -1050,7 +1063,6 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 }
 .toast.toast-error { border-color: oklch(0.85 0.09 22 / 0.5); }
 .toast.toast-error .toast-check { background: var(--danger); color: oklch(1 0 0); }
-@keyframes toast-in { from { transform: translate(-50%, 10px); opacity: 0; } }
 
 /* Loading skeletons */
 .skeleton-block { display: grid; gap: 12px; padding: 20px; }
@@ -2808,11 +2820,34 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
     height: auto;
     width: 282px;
     z-index: 60;
-    transform: translateX(calc(100% + 28px));
-    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    /* Transform is FULLY owned by framer (useEdgeDrawer): 1:1 drag,
+       flick physics, velocity handoff. No CSS transition may touch it. */
     margin: 0;
+    will-change: transform;
   }
-  .app.nav-open .sidebar { transform: translateX(0); }
+  /* Edge grabber — drag handle for the drawer's free (inline-end) edge.
+     Wide hit strip, slim visual pill. */
+  .drawer-grabber {
+    position: absolute;
+    inset-inline-end: 0;
+    top: 0;
+    bottom: 0;
+    width: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    z-index: 5;
+    touch-action: none;
+  }
+  .drawer-grabber:active { cursor: grabbing; }
+  .drawer-grabber i {
+    width: 4px;
+    height: 46px;
+    border-radius: 4px;
+    background: oklch(1 0 0 / 0.32);
+    box-shadow: inset 0 1px 1px oklch(1 0 0 / 0.4), inset 0 -1px 1px oklch(0 0 0 / 0.35);
+  }
   .nav-overlay {
     position: fixed;
     inset: 0;

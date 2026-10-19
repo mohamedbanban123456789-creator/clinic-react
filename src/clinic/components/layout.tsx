@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { AnimatePresence, motion } from "framer-motion"
 import { AppButton, Icon, type IconName, Modal, useToast } from "@/clinic/components/ui"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { useChat } from "@/clinic/context/ChatContext"
@@ -18,6 +19,7 @@ import { shiftsApi } from "@/clinic/api/shifts"
 import { settingsApi } from "@/clinic/api/admin"
 import { arToday } from "@/clinic/lib/format"
 import { secretaryRoleTitle } from "@/clinic/lib/constants"
+import { backdropFade, SPRINGS, TWEENS, useEdgeDrawer } from "@/clinic/motion"
 
 interface NavItem {
   to: string
@@ -118,7 +120,25 @@ function AutoWorkday() {
   return null
 }
 
-export function Sidebar() {
+/** Viewport gate for the shell: ≤1024px swaps the static rail for the
+ *  physics drawer (mirrors the CSS breakpoint exactly). */
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false)
+  useEffect(() => {
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    onChange()
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
+  }, [query])
+  return matches
+}
+
+/* Sidebar CONTENT — shared verbatim by the desktop rail and the mobile
+ * physics drawer. Nav items respond on pointer-down (whileTap) and the
+ * active route is marked by a layoutId indicator that physically slides
+ * between items — the shared-element handoff does the "magic move". */
+function SidebarInner() {
   const { user, logout, updateName } = useAuth()
   const { notify } = useToast()
   const location = useLocation()
@@ -134,7 +154,7 @@ export function Sidebar() {
   const [nameBusy, setNameBusy] = useState(false)
 
   return (
-    <aside className="sidebar">
+    <>
       <div className="brand">
         <div className="brand-mark">
           <span />
@@ -156,15 +176,24 @@ export function Sidebar() {
                   (m !== "/secretary" && m !== "/doctor" && location.pathname.startsWith(m)),
               )
               return (
-                <button
+                <motion.button
                   key={`${group.section}-${item.to}`}
                   className={active ? "nav-item active" : "nav-item"}
                   onClick={() => navigate(item.to)}
+                  whileTap={{ scale: 0.98 }}
+                  transition={TWEENS.press}
                 >
                   <Icon name={item.icon} size={19} />
                   <span>{item.label}</span>
-                  {active && <i />}
-                </button>
+                  {active && (
+                    <motion.i
+                      className="nav-indicator"
+                      layoutId="nav-active-indicator"
+                      transition={SPRINGS.sheet}
+                      aria-hidden="true"
+                    />
+                  )}
+                </motion.button>
               )
             })}
           </div>
@@ -242,7 +271,76 @@ export function Sidebar() {
           </form>
         </Modal>
       )}
+    </>
+  )
+}
+
+/** Desktop rail — static, in-flow, no transform (framer never touches it). */
+export function Sidebar() {
+  return (
+    <aside className="sidebar">
+      <SidebarInner />
     </aside>
+  )
+}
+
+/**
+ * Mobile drawer — the flagship fluid surface:
+ *   - 1:1 finger tracking with rubber-band at both edges (dragElastic)
+ *   - flick to open/close via momentum projection + snap
+ *   - spring settle seeded with the release velocity
+ *   - drag initiates ONLY from the edge grabber (inner scroll never fights)
+ *   - symmetric RTL path: enters from the right, dismisses to the right
+ */
+const DRAWER_GUTTER = 28 // matches the CSS closed offset (100% + 28px)
+
+function MobileSidebar({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const asideRef = useRef<HTMLElement | null>(null)
+  const [width, setWidth] = useState(282)
+  const { motionProps, handleProps } = useEdgeDrawer({
+    open,
+    onOpenChange,
+    size: width + DRAWER_GUTTER,
+  })
+
+  useEffect(() => {
+    const measure = () => {
+      if (asideRef.current) setWidth(asideRef.current.offsetWidth || 282)
+    }
+    measure()
+    window.addEventListener("resize", measure)
+    return () => window.removeEventListener("resize", measure)
+  }, [])
+
+  return (
+    <>
+      <AnimatePresence>
+        {open && (
+          <motion.button
+            type="button"
+            className="nav-overlay"
+            aria-label="إغلاق قائمة التنقل"
+            variants={backdropFade}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            onClick={() => onOpenChange(false)}
+          />
+        )}
+      </AnimatePresence>
+      <motion.aside className="sidebar mobile-drawer" ref={asideRef} {...motionProps}>
+        <SidebarInner />
+        <span className="drawer-grabber" {...handleProps} aria-hidden="true">
+          <i />
+        </span>
+      </motion.aside>
+    </>
   )
 }
 
@@ -265,13 +363,27 @@ export function Header({ title, onMenu }: { title: string; onMenu: () => void })
   return (
     <header className="page-head">
       <div className="page-title">
-        <h1>{title}</h1>
+        <motion.h1
+          key={title}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={SPRINGS.micro}
+        >
+          {title}
+        </motion.h1>
         <small>{arToday()}</small>
       </div>
       <div className="header-actions">
-        <button type="button" className="nav-toggle" onClick={onMenu} aria-label="فتح قائمة التنقل">
+        <motion.button
+          type="button"
+          className="nav-toggle"
+          onClick={onMenu}
+          aria-label="فتح قائمة التنقل"
+          whileTap={{ scale: 0.96 }}
+          transition={TWEENS.press}
+        >
           <Icon name="menu" size={20} />
-        </button>
+        </motion.button>
         <form
           className="global-search"
           onSubmit={(e) => {
@@ -317,11 +429,22 @@ export function Header({ title, onMenu }: { title: string; onMenu: () => void })
 export function AppShell({ title, children }: { title: string; children: React.ReactNode }) {
   const [navOpen, setNavOpen] = useState(false)
   const location = useLocation()
+  const isMobile = useMediaQuery("(max-width: 1024px)")
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setNavOpen(false)
   }, [location.pathname])
+
+  // Escape closes the drawer — parity with modals (a11y).
+  useEffect(() => {
+    if (!navOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navOpen])
 
   return (
     <>
@@ -334,15 +457,11 @@ export function AppShell({ title, children }: { title: string; children: React.R
         <div className="ambient-glow glow-c" />
         <div className="ambient-grid" />
       </div>
-      <div className={`app ${navOpen ? "nav-open" : ""}`} dir="rtl">
-        <Sidebar />
-        {navOpen && (
-          <button
-            type="button"
-            className="nav-overlay"
-            aria-label="إغلاق قائمة التنقل"
-            onClick={() => setNavOpen(false)}
-          />
+      <div className="app" dir="rtl">
+        {isMobile ? (
+          <MobileSidebar open={navOpen} onOpenChange={setNavOpen} />
+        ) : (
+          <Sidebar />
         )}
         <div className="main-shell">
           <Header title={title} onMenu={() => setNavOpen((v) => !v)} />

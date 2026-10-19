@@ -14,6 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { patientsApi } from "@/clinic/api/patients"
 import { queueApi } from "@/clinic/api/queue"
 import { scribeApi } from "@/clinic/api/scribe"
@@ -456,9 +458,14 @@ export default function SessionScreen() {
 
   if (!current && !patientParam) {
     return (
-      <div className="session-layout">
+      <motion.div
+        className="session-layout"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
         <section className="session-main">
-          <section className="card session-patient">
+          <motion.section className="card session-patient" variants={rise}>
             <div className="patient-heading compact">
               <span className="patient-avatar large">؟</span>
               <div>
@@ -470,16 +477,21 @@ export default function SessionScreen() {
             <AppButton variant="outline" onClick={() => navigate("/doctor")}>
               العودة إلى لوحة الطبيب
             </AppButton>
-          </section>
+          </motion.section>
         </section>
-      </div>
+      </motion.div>
     )
   }
 
   return (
-    <div className="session-layout">
+    <motion.div
+      className="session-layout"
+      variants={listStagger}
+      initial="hidden"
+      animate="visible"
+    >
       <section className="session-main">
-        <div className="card session-patient">
+        <motion.div className="card session-patient" variants={rise}>
           <div className="patient-heading compact">
             <span className="patient-avatar large">{patientName.charAt(0)}</span>
             <div>
@@ -503,7 +515,7 @@ export default function SessionScreen() {
           >
             فتح الملف
           </AppButton>
-        </div>
+        </motion.div>
 
         <section className={`card recorder ${state}`}>
           <div className="recorder-visual">
@@ -1021,7 +1033,7 @@ export default function SessionScreen() {
           </div>
         </Modal>
       )}
-    </div>
+    </motion.div>
   )
 }
 

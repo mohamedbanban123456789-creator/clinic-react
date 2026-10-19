@@ -6,9 +6,10 @@
  * summary follows the blind-cash rule, so live collection uses invoices).
  */
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery } from "@tanstack/react-query"
+import { AnimatePresence, motion } from "framer-motion"
 import { useQueue, useQueueInvalidation } from "@/clinic/hooks/useQueue"
 import { useShiftInvoices } from "@/clinic/hooks/useShiftInvoices"
 import { queueApi } from "@/clinic/api/queue"
@@ -32,6 +33,7 @@ import {
   tSec,
 } from "@/clinic/lib/constants"
 import type { QueueEntryDto } from "@/clinic/api/types"
+import { fromEdge, listStagger, rise, SPRINGS, TWEENS } from "@/clinic/motion"
 
 function StatusBadge({ status }: { status: string }) {
   return (
@@ -111,6 +113,25 @@ export default function SecretaryDashboard() {
 
   const [draggedEntryId, setDraggedEntryId] = useState<string | null>(null)
   const [dragOverEntryId, setDragOverEntryId] = useState<string | null>(null)
+
+  /*
+   * Native HTML5 drag handlers are attached imperatively via ref (framer
+   * claims onDragStart/onDragEnd as gesture props and would swallow them).
+   * CRITICAL: the ref callback may only fire ONCE per row (mount), so the
+   * handlers must NOT close over render-time values — they read the latest
+   * state from this per-row box, refreshed on every render below.
+   */
+  const rowDragState = useRef(
+    new Map<
+      string,
+      {
+        canReorder: boolean
+        draggedEntryId: string | null
+        dragOverEntryId: string | null
+        handleDrop: (targetEntryId: string) => void
+      }
+    >(),
+  )
 
   const reorderableWaiting = useMemo(() => {
     return displayEntries.filter((e) => e.status === "WAITING" && !e.isEmergency)
@@ -296,7 +317,12 @@ export default function SecretaryDashboard() {
         </div>
       </section>
 
-      <section className="stats-grid">
+      <motion.section
+        className="stats-grid"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
         <StatCard
           label="زيارات اليوم"
           value={arNum(stats.total)}
@@ -337,10 +363,15 @@ export default function SecretaryDashboard() {
           icon="wallet"
           tone="mint"
         />
-      </section>
+      </motion.section>
 
-      <div className="dashboard-grid">
-        <section className="card queue-card">
+      <motion.div
+        className="dashboard-grid"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="card queue-card" variants={rise}>
           <div className="card-header">
             <div>
               <span className="section-kicker">مباشر الآن</span>
@@ -354,9 +385,16 @@ export default function SecretaryDashboard() {
             )}
           </div>
 
-          {queue?.activeCallRequest && (
-            <div className="call-request-banner">
-              <div className="call-request-info">
+          <AnimatePresence>
+            {queue?.activeCallRequest && (
+              <motion.div
+                className="call-request-banner"
+                variants={fromEdge}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+              >
+                <div className="call-request-info">
                 <div className="call-request-icon">
                   <Icon name="userCheck" size={20} />
                 </div>
@@ -386,8 +424,9 @@ export default function SecretaryDashboard() {
                   {approveCallMutation.isPending ? "جارٍ التحديث..." : "المريض جاهز"}
                 </AppButton>
               </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div className="queue-table">
             <div className="queue-head">
@@ -411,7 +450,8 @@ export default function SecretaryDashboard() {
                 <span>لا مرضى في الطابور بعد — سجّل أول حضور.</span>
               </div>
             )}
-            {displayEntries.map((patient, index) => {
+            <AnimatePresence initial={false}>
+              {displayEntries.map((patient, index) => {
               const actionable =
                 patient.status === "WAITING" ||
                 patient.status === "SKIPPED" ||
@@ -444,43 +484,70 @@ export default function SecretaryDashboard() {
               const isLast = waitingIdx === reorderableWaiting.length - 1
               const canReorder = isReorderable && reorderableWaiting.length > 1
 
+              // Refresh the per-row latest-state box every render — the
+              // imperative handlers below read it AT EVENT TIME.
+              rowDragState.current.set(patient.entryId, {
+                canReorder,
+                draggedEntryId,
+                dragOverEntryId,
+                handleDrop,
+              })
+
               return (
-                <div
+                <motion.div
                   className={`queue-row ${patient.isEmergency ? "emergency" : ""} ${
                     patient.entryId === nextWaiting?.entryId ? "next-row" : ""
                   } ${isReorderable && canReorder ? "draggable" : ""} ${
                     draggedEntryId === patient.entryId ? "dragging" : ""
                   } ${dragOverEntryId === patient.entryId ? "drag-over" : ""}`}
                   key={patient.entryId}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, transition: TWEENS.exit }}
+                  transition={SPRINGS.micro}
                   draggable={canReorder && !reorderMutation.isPending}
-                  onDragStart={(e) => {
-                    if (!canReorder) return
-                    setDraggedEntryId(patient.entryId)
-                    e.dataTransfer.effectAllowed = "move"
-                  }}
-                  onDragOver={(e) => {
-                    if (canReorder && draggedEntryId && draggedEntryId !== patient.entryId) {
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = "move"
+                  ref={(el) => {
+                    // Native HTML5 drag handlers, attached imperatively:
+                    // framer-motion claims onDragStart/onDragEnd as gesture
+                    // props and would swallow them if passed as JSX props.
+                    // Handlers read live values from rowDragState (never from
+                    // this closure — the ref may fire only once per row).
+                    if (!el) return
+                    el.ondragstart = (ev) => {
+                      const s = rowDragState.current.get(patient.entryId)
+                      if (!s || !s.canReorder) return
+                      setDraggedEntryId(patient.entryId)
+                      if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move"
                     }
-                  }}
-                  onDragEnter={() => {
-                    if (canReorder && draggedEntryId && draggedEntryId !== patient.entryId) {
-                      setDragOverEntryId(patient.entryId)
+                    el.ondragover = (ev) => {
+                      const s = rowDragState.current.get(patient.entryId)
+                      if (s && s.canReorder && s.draggedEntryId && s.draggedEntryId !== patient.entryId) {
+                        ev.preventDefault()
+                        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move"
+                      }
                     }
-                  }}
-                  onDragLeave={() => {
-                    if (dragOverEntryId === patient.entryId) {
+                    el.ondragenter = () => {
+                      const s = rowDragState.current.get(patient.entryId)
+                      if (s && s.canReorder && s.draggedEntryId && s.draggedEntryId !== patient.entryId) {
+                        setDragOverEntryId(patient.entryId)
+                      }
+                    }
+                    el.ondragleave = () => {
+                      const s = rowDragState.current.get(patient.entryId)
+                      if (s && s.dragOverEntryId === patient.entryId) {
+                        setDragOverEntryId(null)
+                      }
+                    }
+                    el.ondrop = (ev) => {
+                      ev.preventDefault()
+                      const s = rowDragState.current.get(patient.entryId)
+                      if (s) s.handleDrop(patient.entryId)
+                    }
+                    el.ondragend = () => {
+                      setDraggedEntryId(null)
                       setDragOverEntryId(null)
                     }
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    handleDrop(patient.entryId)
-                  }}
-                  onDragEnd={() => {
-                    setDraggedEntryId(null)
-                    setDragOverEntryId(null)
                   }}
                 >
                   <div className="position">
@@ -586,12 +653,13 @@ export default function SecretaryDashboard() {
                   ) : (
                     <span />
                   )}
-                </div>
+                </motion.div>
               )
             })}
+            </AnimatePresence>
           </div>
-        </section>
-        <aside className="side-stack">
+        </motion.section>
+        <motion.aside className="side-stack" variants={listStagger}>
           <section className="card next-patient-card">
             <div className="mini-title">
               <span className="live-dot" /> التالي للدخول
@@ -659,8 +727,8 @@ export default function SecretaryDashboard() {
               فتح المدفوعات <Icon name="arrow" size={15} />
             </button>
           </section>
-        </aside>
-      </div>
+        </motion.aside>
+      </motion.div>
     </>
   )
 }

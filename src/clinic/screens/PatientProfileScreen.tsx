@@ -10,6 +10,8 @@
 import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { patientsApi } from "@/clinic/api/patients"
 import { ehrApi } from "@/clinic/api/ehr"
 import { vaultApi } from "@/clinic/api/vault"
@@ -265,7 +267,7 @@ export default function PatientProfileScreen() {
 
   return (
     <>
-      <section className="card patient-header-card">
+      <motion.section className="card patient-header-card" variants={rise}>
         <div className="patient-heading">
           <span className="patient-avatar xl">{patient.fullName.charAt(0)}</span>
           <div>
@@ -323,10 +325,15 @@ export default function PatientProfileScreen() {
             </AppButton>
           )}
         </div>
-      </section>
+      </motion.section>
 
-      <div className="profile-layout">
-        <section className="card profile-main">
+      <motion.div
+        className="profile-layout"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="card profile-main" variants={rise}>
           <div className="tabs">
             {isDoctor && (
               <>
@@ -485,10 +492,10 @@ export default function PatientProfileScreen() {
               ))}
             </div>
           )}
-        </section>
+        </motion.section>
 
-        <aside className="side-stack">
-          <section className="card care-summary">
+        <motion.aside className="side-stack" variants={listStagger}>
+          <motion.section className="card care-summary" variants={rise}>
             <h3>ملخص المتابعة</h3>
             {isDoctor ? (
               <>
@@ -547,7 +554,7 @@ export default function PatientProfileScreen() {
                 </span>
               </>
             )}
-          </section>
+          </motion.section>
 
           {isDoctor && (
             <>
@@ -596,8 +603,8 @@ export default function PatientProfileScreen() {
               </section>
             </>
           )}
-        </aside>
-      </div>
+        </motion.aside>
+      </motion.div>
 
       {vaultOpen && <VaultPanel patientId={patient.id} onClose={() => setVaultOpen(false)} />}
     </>

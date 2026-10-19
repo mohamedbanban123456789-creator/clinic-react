@@ -11,12 +11,14 @@
 import { lazy, Suspense, useEffect } from "react"
 import { Navigate, Route, Routes, useLocation } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { motion } from "framer-motion"
 import { AuthProvider, useAuth } from "@/clinic/auth/AuthContext"
 import { RealtimeProvider } from "@/clinic/realtime/socket"
 import { ToastProvider, useToast } from "@/clinic/components/ui"
 import { ChatProvider } from "@/clinic/context/ChatContext"
 import { AppShell } from "@/clinic/components/layout"
 import { routeTitle } from "@/clinic/lib/constants"
+import { rise } from "@/clinic/motion"
 
 /* ------------------------------------------------------------------ */
 /* Route-based code splitting — each screen ships as its own chunk so  */
@@ -63,9 +65,14 @@ function ShellRoute({ children }: { children: React.ReactNode }) {
   const title = routeTitle[location.pathname] ?? "عيادة سكينة"
   return (
     <AppShell title={title}>
-      <Suspense fallback={<ScreenLoader />}>
-        {children}
-      </Suspense>
+      {/* Route transition: the new screen rises gently as it mounts —
+          calm, no cross-fade lag, no double scrollbars. The key remounts
+          per route so each screen re-runs its mount motion. */}
+      <motion.div key={location.pathname} initial="hidden" animate="visible" variants={rise}>
+        <Suspense fallback={<ScreenLoader />}>
+          {children}
+        </Suspense>
+      </motion.div>
     </AppShell>
   )
 }

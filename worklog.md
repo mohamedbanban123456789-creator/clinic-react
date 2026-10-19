@@ -245,3 +245,116 @@ Stage Summary:
   flick / RTL mirrored spatial paths / no letter-spacing on Arabic /
   calm restraint for mental-health context
 - No screen has been touched yet — refactor starts when code arrives
+
+---
+Task ID: 9
+Agent: main (Super Z)
+Task: FULL INTEGRATION of the Apple fluid-interfaces motion system into all
+17 screens + shared kit, then complete testing (animations, RTL, responsive,
+a11y, functional regression, performance) with root-cause fixes
+
+Work Log:
+- SHARED KIT (propagates everywhere):
+  * ui.tsx: Modal now plays enter (backdrop fade + panel scale/y condense,
+    SPRINGS.sheet) AND exit via internal closing phase -> onExitComplete ->
+    parent onClose (zero call-site changes); Escape key + role=dialog +
+    aria-modal added; Toast wrapped in AnimatePresence with x:"-50%" kept in
+    every state (preserves CSS centering), spring enter + tween exit;
+    StatCard -> motion.article variants=rise (joins parent staggers);
+    EmptyState/ErrorState rise on mount
+  * layout.tsx: Sidebar split into SidebarInner + desktop rail + MobileSidebar
+    (useEdgeDrawer: 1:1 drag, dragElastic 0.18 rubber-band, flick projection,
+    velocity-seeded spring settle, grabber-only drag initiation, Esc closes);
+    nav-overlay now motion.button backdropFade in AnimatePresence; nav items
+    motion.button whileTap; ACTIVE ROUTE marked by motion.i layoutId
+    "nav-active-indicator" that physically slides between items; header h1
+    crossfades on route change (key remount, SPRINGS.micro); AppShell swaps
+    sidebar by useMediaQuery(1024) gate; .app.nav-open class retired
+  * App.tsx ShellRoute: page content motion.div key=pathname variants=rise
+    (each route mount rises calmly; no cross-fade lag, no double scrollbars)
+- SCREENS (all 17): Login (visual side stagger + card rise + animated error
+  box + eye whileTap), SecretaryDashboard (stats stagger, dashboard-grid
+  stagger, call banner fromEdge in AnimatePresence, queue rows motion+layout
+  with enter/exit + native drag PRESERVED via ref-attached handlers),
+  DoctorDashboard (stats stagger, doctor-grid stagger, queue rows layout,
+  call banner), CheckIn (two-col stagger), Payments (layout stagger),
+  Closing (stats + closing-grid + 3 cards rise), Reports (stats stagger),
+  Medications (both branches: bento stagger incl. side cards; med-layout
+  stagger incl. med-patient/medication-list/discontinued/side cards),
+  Receipts (archive card rise), Settings (form + users cards rise),
+  PatientsBrowser (form rise), PatientProfile (header rise + profile-layout
+  stagger + side stack), Session (both branches, session cards),
+  Soap (soap-layout stagger, document + side), Chat (page + followups card),
+  Conversation (message bubbles spring in, send button whileTap/whileHover,
+  floating panel fromEdge in AnimatePresence, unread badge pop-in, chat
+  toggle whileTap), Display (grid stagger + tiles layout), ChangePassword
+  (card rise)
+- CSS conflicts resolved: removed .modal animation:modal-in + keyframes,
+  .toast animation:toast-in + keyframes (framer owns), .btn/.icon-button
+  transform transition retuned to 100ms ease-out, .nav-item:active removed
+  (whileTap owns), mobile .sidebar CSS transform+transition removed (framer
+  owns, will-change added), .app.nav-open .sidebar rule removed; ADDED
+  .nav-indicator (teal gradient bar, no transform so layout projection is
+  clean), .drawer-grabber + pill, .drag-x
+- CRITICAL BUGS FOUND & FIXED during testing:
+  1) framer-motion claims onDragStart/onDragEnd as gesture props — JSX-propped
+     native HTML5 handlers would be SILENTLY swallowed, breaking queue
+     reorder -> attached imperatively via ref callback
+  2) STALE CLOSURE bug: the ref callback fires only ONCE per row mount, so
+     ref-attached handlers captured mount-time canReorder=false (row mounted
+     while alone in queue) -> dragstart early-returned forever. FIXED with
+     rowDragState Map refreshed every render, handlers read state at EVENT
+     TIME. Verified: full drag sequence now reorders (Hala<->Marwan swap),
+     move buttons also green
+  3) Conversation.tsx + others use CRLF line endings — Edit tool \n matching
+     fails -> python crlf-aware replacements
+  4) Dev-server CSS HMR went STALE during rapid multi-file edits (new rules
+     not served) -> dev server restart with .next/dev/cache clear fixed;
+     note for future rapid-edit sessions
+  5) PatientProfileScreen mangled by a bad rfind (file duplicated after
+     char 11) -> git checkout restore + careful redo
+- ENV: backend qa-booted fresh (disposable DB port changes every boot!) —
+  reset_clinic_passwords.mjs patched to read live clinic-qa-info.json URL;
+  doctor/Doctor2026! restored; secretary re-created via Settings UI
+  (passwordMustChange honored -> rotated to Sukina2026! through the real
+  ChangePasswordScreen — also exercised that screen's motion); currency
+  re-set to EGP
+- VERIFIED IN BROWSER (2 parallel agent-browser sessions, doctor+secretary):
+  * Animations: modal enter/exit measured mid-fade (backdrop op 0.07) then
+    clean unmount; Esc/backdrop/X all animated; nav-indicator slides
+    (top 156->210 between routes); stat staggers; page rise; toasts
+  * Drawer (390px): open -> transform none; mid-drag 1:1 tracking
+    (matrix x=216 matching pointer delta); flick release -> momentum
+    settle x=310 (closed, 282+28 gutter) + overlay exits; rubber-band
+    resistance toward open (stays open); menu reopens; grabber 18px hit area
+  * Functional clinic-day loop GREEN: login both roles -> password rotation
+    -> secretary account creation -> currency EGP -> patient registration
+    (Hala, Arabic calendar 22/02/1994) -> check-in -> doctor call request
+    (ReviewModal) -> secretary approve -> live session -> manual SOAP draft
+    -> fill S/O/A/P + Dx (F41.1) -> save -> SIGN (report approved) -> visit
+    completed -> 500 EGP cash payment + receipt modal -> second check-in
+    (returning patient flow w/ debt alert) + third patient (Marwan) ->
+    native drag reorder + move buttons both swap order; intercom BOTH
+    directions realtime < 3s (sec->doc and doc->sec messages appear live)
+  * Responsive: 360/390/768/1280/1440 ALL zero horizontal overflow
+  * A11y: prefers-reduced-motion emulated -> page loads, zero errors
+    (MotionConfig reducedMotion="user" + CSS kill-switch); reduced-
+    transparency solid fallback rule present in stylesheet (visual spot-
+    check via injected equivalent)
+  * Perf: zero console/page errors across ALL 17 routes in both sessions;
+    blur budget unchanged (<=12px); layout animations only on queue rows
+    (~10 elements); VLM visual review: dashboard 10/10 clean (initial
+    "chat overlap" flag = floating panel open by design), mobile drawer
+    pass (slides from right, grabber visible, overlay blurred, no clipping)
+
+Stage Summary:
+- Fluid motion system fully live across the entire app: springs (damping
+  1.0 / bounce 0.15 momentum-only), RTL-symmetric paths, interruptible
+  drag physics on the drawer, layout-animated queue, sliding nav indicator,
+  animated modals/toasts/banners/messages
+- Two real bugs caught by testing (gesture-prop swallowing + stale ref
+  closure) — both root-caused and fixed, regression-verified green
+- Working credentials: doctor/Doctor2026!, secretary/Sukina2026!
+  (rotated through the real flow this session)
+- Deliverables: download/motion-01..15 screenshots; all changes in src/
+  (tsc clean, eslint untouched), CSS conflicts resolved

@@ -2,14 +2,19 @@
 // Uses the exact same argon2id settings as backend hash.ts (timeCost 3, mem 19456, par 1)
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 const BACKEND_DIR = '/home/z/my-project/upload/extracted/sakeena-clinic-complete/backend';
 const require = createRequire(pathToFileURL(`${BACKEND_DIR}/package.json`));
 const argon2 = require('argon2');
 const { PrismaClient } = require('@prisma/client');
 
-const DATABASE_URL =
-  'postgresql://clinic_app:app-d1bceb3b8a029f706f402f32@127.0.0.1:46735/clinic_e2e?client_encoding=utf8';
+// The disposable postgres gets a NEW port/credentials on every qa-boot —
+// always resolve the live URL from the qa-info JSON the backend just wrote.
+const qaInfo = JSON.parse(
+  readFileSync('/home/z/my-project/clinic-qa-info.json', 'utf8'),
+);
+const DATABASE_URL = qaInfo.appUrl;
 process.env.DATABASE_URL = DATABASE_URL;
 
 const NEW_PASSWORDS = {

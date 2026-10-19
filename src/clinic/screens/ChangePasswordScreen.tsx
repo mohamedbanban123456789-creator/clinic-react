@@ -6,6 +6,8 @@
 
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { motion } from "framer-motion"
+import { SPRINGS } from "@/clinic/motion"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { apiErrorMessage, ApiError } from "@/clinic/api/client"
 import { AppButton, Icon, useToast } from "@/clinic/components/ui"
@@ -79,7 +81,13 @@ export default function ChangePasswordScreen() {
         </small>
       </div>
       <div className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
+        <motion.form
+          className="login-card"
+          onSubmit={submit}
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={SPRINGS.calm}
+        >
           <div className="mobile-brand">
             <div className="brand-mark">
               <Icon name="heart" />
@@ -152,7 +160,7 @@ export default function ChangePasswordScreen() {
               <small>ستحتاج لتسجيل الدخول مرة أخرى بعد الحفظ.</small>
             </span>
           </div>
-        </form>
+        </motion.form>
       </div>
     </div>
   )

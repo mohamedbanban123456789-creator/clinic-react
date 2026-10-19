@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { patientsApi, type CreatePatientInput } from "@/clinic/api/patients"
 import { queueApi } from "@/clinic/api/queue"
 import { settingsApi } from "@/clinic/api/admin"
@@ -250,8 +252,13 @@ export default function CheckInScreen() {
   }
 
   return (
-    <div className="two-col-layout">
-      <section className="card form-card">
+    <motion.div
+      className="two-col-layout"
+      variants={listStagger}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.section className="card form-card" variants={rise}>
         <div className="step-header">
           <span className="step-no">١</span>
           <div>
@@ -445,8 +452,8 @@ export default function CheckInScreen() {
             <p>ستظهر النتائج المطابقة هنا مع آخر زيارة وأي رصيد مستحق.</p>
           </div>
         )}
-      </section>
-      <aside className="card registration-prompt">
+      </motion.section>
+      <motion.aside className="card registration-prompt" variants={rise}>
         <div className="prompt-art">
           <span />
           <Icon name="userPlus" size={38} />
@@ -471,7 +478,7 @@ export default function CheckInScreen() {
         <AppButton variant="secondary" icon="plus" onClick={() => setShowRegistration(true)}>
           تسجيل مريض جديد
         </AppButton>
-      </aside>
+      </motion.aside>
 
       {showRegistration && (
         <NewPatientModal
@@ -479,6 +486,6 @@ export default function CheckInScreen() {
           onCreated={onContinueRegistration}
         />
       )}
-    </div>
+    </motion.div>
   )
 }

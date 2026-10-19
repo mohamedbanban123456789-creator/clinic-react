@@ -9,6 +9,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { shiftsApi } from "@/clinic/api/shifts"
 import { supervisionApi } from "@/clinic/api/admin"
 import { useShiftInvoices } from "@/clinic/hooks/useShiftInvoices"
@@ -312,7 +314,12 @@ export default function ClosingScreen() {
         </div>
       </section>
 
-      <section className="stats-grid four">
+      <motion.section
+        className="stats-grid four"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
         <StatCard
           label="زيارات اليوم"
           value={arNum(summaryQuery.data?.totalServed ?? aggregates.served)}
@@ -355,10 +362,15 @@ export default function ClosingScreen() {
           icon="banknote"
           tone="teal"
         />
-      </section>
+      </motion.section>
 
-      <div className="closing-grid">
-        <section className="card expenses-card">
+      <motion.div
+        className="closing-grid"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="card expenses-card" variants={rise}>
           <div className="card-header">
             <div>
               <h3>المصروفات النثرية</h3>
@@ -392,9 +404,9 @@ export default function ClosingScreen() {
             <span>إجمالي البنود</span>
             <strong>{moneyMinor(aggregates.pettyTotal)}</strong>
           </div>
-        </section>
+        </motion.section>
 
-        <section className="card reconciliation">
+        <motion.section className="card reconciliation" variants={rise}>
           <div className="card-header">
             <div>
               <h3>مطابقة الخزينة النقدية</h3>
@@ -503,10 +515,10 @@ export default function ClosingScreen() {
               )}
             </div>
           )}
-        </section>
-      </div>
+        </motion.section>
+      </motion.div>
 
-      <section className="card report-chart">
+      <motion.section className="card report-chart" variants={rise}>
         <div className="card-header">
           <div>
             <h3>توزيع الإيراد حسب طريقة الدفع</h3>
@@ -555,7 +567,7 @@ export default function ClosingScreen() {
             </span>
           </div>
         </div>
-      </section>
+      </motion.section>
 
       {showAddPetty && current && (
         <AddPettyModal shiftId={current.shiftId} onClose={() => setShowAddPetty(false)} />

@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { rise } from "@/clinic/motion"
 import { patientsApi } from "@/clinic/api/patients"
 import { arAgo, arNum, ageFromDob, formatPhone } from "@/clinic/lib/format"
 import { Icon } from "@/clinic/components/ui"
@@ -35,7 +37,7 @@ export default function PatientsBrowserScreen() {
   }
 
   return (
-    <section className="card form-card">
+    <motion.section className="card form-card" variants={rise}>
       <div className="step-header">
         <span className="step-no">١</span>
         <div>
@@ -109,6 +111,6 @@ export default function PatientsBrowserScreen() {
           <p>اكتب اسم المريض أو رقم هاتفه لعرض ملفه.</p>
         </div>
       )}
-    </section>
+    </motion.section>
   )
 }

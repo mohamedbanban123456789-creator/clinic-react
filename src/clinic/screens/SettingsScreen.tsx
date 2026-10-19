@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { rise } from "@/clinic/motion"
 import { settingsApi, usersApi } from "@/clinic/api/admin"
 import { apiErrorMessage } from "@/clinic/api/client"
 import { AppButton, Icon, Modal, useToast, SkeletonBlock } from "@/clinic/components/ui"
@@ -138,7 +140,7 @@ export default function SettingsScreen() {
 
   return (
     <>
-      <section className="card form-card" style={{ marginBottom: "16px" }}>
+      <motion.section className="card form-card" style={{ marginBottom: "16px" }} variants={rise}>
         <div className="card-header">
           <div>
             <span className="section-kicker">إعدادات العيادة</span>
@@ -225,9 +227,9 @@ export default function SettingsScreen() {
             </div>
           </form>
         )}
-      </section>
+      </motion.section>
 
-      <section className="card archive-card">
+      <motion.section className="card archive-card" variants={rise}>
         <div className="card-header">
           <div>
             <span className="section-kicker">فريق العيادة</span>
@@ -293,7 +295,7 @@ export default function SettingsScreen() {
             </div>
           ))}
         </div>
-      </section>
+      </motion.section>
 
       {showCreate && (
         <Modal

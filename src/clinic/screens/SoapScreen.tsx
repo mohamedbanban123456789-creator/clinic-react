@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { ehrApi, type AiDiagnosisResultDto } from "@/clinic/api/ehr"
 import { patientsApi } from "@/clinic/api/patients"
 import { supervisionApi } from "@/clinic/api/admin"
@@ -453,8 +455,13 @@ export default function SoapScreen() {
         </div>
       </section>
 
-      <div className="soap-layout">
-        <section className="soap-document">
+      <motion.div
+        className="soap-layout"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="soap-document" variants={rise}>
           {isDraft && encounter.source === "SCRIBE" && (
             <div className="ai-disclaimer">
               <Icon name="sparkle" />
@@ -742,9 +749,9 @@ export default function SoapScreen() {
               </div>
             </article>
           )}
-        </section>
+        </motion.section>
 
-        <aside className="side-stack soap-side">
+        <motion.aside className="side-stack soap-side" variants={rise}>
           <section className="card review-checklist">
             <h3>قائمة المراجعة</h3>
             {(["S", "O", "A", "P"] as const).map((k) => {
@@ -774,8 +781,8 @@ export default function SoapScreen() {
           <button className="back-profile" onClick={() => navigate(`/doctor/patients/${encounter.patientId}`)}>
             <Icon name="arrow" /> العودة إلى الملف الطبي
           </button>
-        </aside>
-      </div>
+        </motion.aside>
+      </motion.div>
 
       {showAddendum && (
         <Modal

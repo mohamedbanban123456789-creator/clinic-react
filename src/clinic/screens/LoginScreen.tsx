@@ -6,9 +6,11 @@
 
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { AnimatePresence, motion } from "framer-motion"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { apiErrorMessage, ApiError } from "@/clinic/api/client"
 import { AppButton, Icon, useToast } from "@/clinic/components/ui"
+import { listStagger, rise, SPRINGS, TWEENS } from "@/clinic/motion"
 
 export default function LoginScreen() {
   const { login } = useAuth()
@@ -52,8 +54,13 @@ export default function LoginScreen() {
 
   return (
     <div className="login-page" dir="rtl">
-      <div className="login-visual">
-        <div className="login-brand">
+      <motion.div
+        className="login-visual"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div className="login-brand" variants={rise}>
           <div className="brand-mark">
             <Icon name="heart" />
           </div>
@@ -61,8 +68,8 @@ export default function LoginScreen() {
             <strong>سكينة</strong>
             <small>لإدارة العيادات النفسية</small>
           </span>
-        </div>
-        <div className="login-quote">
+        </motion.div>
+        <motion.div className="login-quote" variants={rise}>
           <div className="quote-art">
             <span />
             <span />
@@ -75,13 +82,19 @@ export default function LoginScreen() {
             في مساحة واحدة آمنة.
           </h1>
           <p>من لحظة وصول المريض وحتى اكتمال التوثيق السريري وإغلاق الخزينة.</p>
-        </div>
-        <small className="copyright">
+        </motion.div>
+        <motion.small className="copyright" variants={rise}>
           © ٢٠٢٦ نظام سكينة · استخدام داخلي للعيادة
-        </small>
-      </div>
+        </motion.small>
+      </motion.div>
       <div className="login-form-wrap">
-        <form className="login-card" onSubmit={submit}>
+        <motion.form
+          className="login-card"
+          onSubmit={submit}
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={SPRINGS.calm}
+        >
           <div className="mobile-brand">
             <div className="brand-mark">
               <Icon name="heart" />
@@ -91,15 +104,23 @@ export default function LoginScreen() {
           <span className="section-kicker">مرحبًا بعودتك</span>
           <h2>تسجيل دخول فريق العيادة</h2>
           <p>أدخل بيانات حسابك للوصول إلى مساحة العمل.</p>
-          {error && (
-            <div className="login-error">
-              <Icon name="alert" />
-              <span>
-                <strong>تعذر تسجيل الدخول</strong>
-                <small>{error}</small>
-              </span>
-            </div>
-          )}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                className="login-error"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6, transition: TWEENS.exit }}
+                transition={SPRINGS.micro}
+              >
+                <Icon name="alert" />
+                <span>
+                  <strong>تعذر تسجيل الدخول</strong>
+                  <small>{error}</small>
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <label className="field has-lead-icon">
             <span>البريد الإلكتروني أو اسم المستخدم</span>
             <span className="field-icon lead" aria-hidden="true">
@@ -124,9 +145,15 @@ export default function LoginScreen() {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
             />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="إظهار كلمة المرور">
+            <motion.button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label="إظهار كلمة المرور"
+              whileTap={{ scale: 0.88 }}
+              transition={TWEENS.press}
+            >
               <Icon name="eye" />
-            </button>
+            </motion.button>
           </label>
           <label className="remember">
             <input
@@ -146,7 +173,7 @@ export default function LoginScreen() {
               <small>هذه المنصة مخصصة لفريق العيادة فقط.</small>
             </span>
           </div>
-        </form>
+        </motion.form>
       </div>
     </div>
   )

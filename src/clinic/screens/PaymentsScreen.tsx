@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { motion } from "framer-motion"
+import { listStagger, rise } from "@/clinic/motion"
 import { billingApi } from "@/clinic/api/billing"
 import { patientsApi } from "@/clinic/api/patients"
 import { queueApi } from "@/clinic/api/queue"
@@ -256,8 +258,13 @@ export default function PaymentsScreen() {
   )
 
   return (
-    <div className="payment-layout">
-      <section className="card billing-form">
+    <motion.div
+      className="payment-layout"
+      variants={listStagger}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.section className="card billing-form" variants={rise}>
         <div className="card-header">
           <div>
             <span className="section-kicker">
@@ -393,8 +400,8 @@ export default function PaymentsScreen() {
             </div>
           </>
         )}
-      </section>
-      <aside className="card invoice-summary">
+      </motion.section>
+      <motion.aside className="card invoice-summary" variants={rise}>
         <span className="section-kicker">ملخص الحساب</span>
         <h3>قيمة الزيارة</h3>
         {selectedInvoice ? (
@@ -447,7 +454,7 @@ export default function PaymentsScreen() {
             <p>تُنشأ الفاتورة تلقائيًا عند اكتمال الزيارة من مساحة الطبيب.</p>
           </div>
         )}
-      </aside>
+      </motion.aside>
 
       {receipt && (
         <ReceiptModal
@@ -511,6 +518,6 @@ export default function PaymentsScreen() {
           </div>
         </Modal>
       )}
-    </div>
+    </motion.div>
   )
 }

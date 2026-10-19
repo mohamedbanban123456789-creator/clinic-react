@@ -12,6 +12,8 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react"
+import { AnimatePresence, motion } from "framer-motion"
+import { backdropFade, modalCenter, rise, SPRINGS, TWEENS } from "@/clinic/motion"
 
 export type IconName =
   | "grid"
@@ -319,6 +321,11 @@ export function AppButton({
   )
 }
 
+/**
+ * StatCard participates in parent stagger orchestration: it carries only
+ * `variants` (no own initial/animate), so a motion parent with
+ * `listStagger` animates the whole grid; without one it renders static.
+ */
 export function StatCard({
   label,
   value,
@@ -335,7 +342,7 @@ export function StatCard({
   tone: string
 }) {
   return (
-    <article className={`stat-card ${tone}`}>
+    <motion.article className={`stat-card ${tone}`} variants={rise}>
       <div className="stat-icon">
         <Icon name={icon} size={21} />
       </div>
@@ -346,10 +353,22 @@ export function StatCard({
         </strong>
         <span>{hint}</span>
       </div>
-    </article>
+    </motion.article>
   )
 }
 
+/**
+ * Modal — fluid glass dialog.
+ *
+ * Motion contract: backdrop fades (never scales — it sits BEHIND glass);
+ * the panel condenses in (scale+opacity+y, SPRINGS.sheet) and exits along
+ * the same symmetric path with a quick calm tween. Close requests
+ * (backdrop / X / Escape) play the exit FIRST, then report `onClose` to
+ * the parent on completion — parents need zero changes.
+ *
+ * Keyboard: Escape closes (added with the motion pass for a11y parity
+ * with the pointer paths).
+ */
 export function Modal({
   title,
   subtitle,
@@ -363,24 +382,57 @@ export function Modal({
   children: ReactNode
   danger?: boolean
 }) {
+  const [closing, setClosing] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setClosing(true)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section
-        className={`modal ${danger ? "danger-modal" : ""}`}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <h2>{title}</h2>
-            {subtitle && <p>{subtitle}</p>}
-          </div>
-          <button onClick={onClose} aria-label="إغلاق">
-            ×
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
+    <AnimatePresence
+      onExitComplete={() => {
+        setClosing(false)
+        onClose()
+      }}
+    >
+      {!closing && (
+        <motion.div
+          className="modal-backdrop"
+          variants={backdropFade}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          onMouseDown={() => setClosing(true)}
+        >
+          <motion.section
+            className={`modal ${danger ? "danger-modal" : ""}`}
+            variants={modalCenter}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            onMouseDown={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={title}
+          >
+            <div className="modal-header">
+              <div>
+                <h2>{title}</h2>
+                {subtitle && <p>{subtitle}</p>}
+              </div>
+              <button onClick={() => setClosing(true)} aria-label="إغلاق">
+                ×
+              </button>
+            </div>
+            {children}
+          </motion.section>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
@@ -418,14 +470,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ notify }}>
       {children}
-      {toast && (
-        <div key={toast.id} className={`toast ${toast.variant === "error" ? "toast-error" : ""}`}>
-          <span className="toast-check">
-            <Icon name={toast.variant === "error" ? "alert" : "check"} size={16} />
-          </span>
-          {toast.message}
-        </div>
-      )}
+      {/* Toast keeps its CSS centering (left:50%) — framer owns x as
+          "-50%" in every state so the capsule never drifts. */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            className={`toast ${toast.variant === "error" ? "toast-error" : ""}`}
+            initial={{ opacity: 0, y: 18, x: "-50%", scale: 0.94 }}
+            animate={{ opacity: 1, y: 0, x: "-50%", scale: 1 }}
+            exit={{ opacity: 0, y: 12, x: "-50%", scale: 0.97, transition: TWEENS.exit }}
+            transition={SPRINGS.sheet}
+          >
+            <span className="toast-check">
+              <Icon name={toast.variant === "error" ? "alert" : "check"} size={16} />
+            </span>
+            {toast.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </ToastContext.Provider>
   )
 }
@@ -462,12 +525,17 @@ export function ErrorState({
   onRetry?: () => void
 }) {
   return (
-    <div className="error-state">
+    <motion.div
+      className="error-state"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRINGS.calm}
+    >
       <Icon name="alert" size={30} />
       <h3>تعذر تحميل البيانات</h3>
       <p>{message}</p>
       {onRetry && <AppButton variant="outline" onClick={onRetry}>إعادة المحاولة</AppButton>}
-    </div>
+    </motion.div>
   )
 }
 
@@ -483,12 +551,17 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="empty-state">
+    <motion.div
+      className="empty-state"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={SPRINGS.calm}
+    >
       <Icon name={icon} size={34} />
       <h3>{title}</h3>
       <p>{text}</p>
       {action}
-    </div>
+    </motion.div>
   )
 }
 

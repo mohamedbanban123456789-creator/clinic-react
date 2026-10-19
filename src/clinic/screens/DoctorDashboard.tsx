@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AnimatePresence, motion } from "framer-motion"
 import { useAuth } from "@/clinic/auth/AuthContext"
 import { useQueue, useQueueInvalidation } from "@/clinic/hooks/useQueue"
 import { queueApi } from "@/clinic/api/queue"
@@ -21,6 +22,7 @@ import { useCallRequest } from "@/clinic/realtime/socket"
 import { arNum, arTimer, arDate, ageFromDob, arAgo, moneyMinor } from "@/clinic/lib/format"
 import { emergencyReasonLabel } from "@/clinic/lib/constants"
 import type { UnsignedNotesDto, QueueEntryDto } from "@/clinic/api/types"
+import { fromEdge, listStagger, rise, SPRINGS, TWEENS } from "@/clinic/motion"
 
 function ReviewModal({
   data,
@@ -410,7 +412,12 @@ export default function DoctorDashboard() {
         <div className="hero-orb orb_two" />
       </section>
 
-      <section className="stats-grid four doctor-stats">
+      <motion.section
+        className="stats-grid four doctor-stats"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
         <StatCard
           label="في الانتظار"
           value={arNum(waiting.length)}
@@ -444,10 +451,15 @@ export default function DoctorDashboard() {
           icon="timer"
           tone="teal"
         />
-      </section>
+      </motion.section>
 
-      <div className="doctor-grid">
-        <section className="card doctor-queue">
+      <motion.div
+        className="doctor-grid"
+        variants={listStagger}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.section className="card doctor-queue" variants={rise}>
           <div className="card-header">
             <div>
               <span className="section-kicker">قائمة الانتظار</span>
@@ -466,9 +478,16 @@ export default function DoctorDashboard() {
             </AppButton>
           </div>
 
-          {queue?.activeCallRequest && (
-            <div className="call-request-banner">
-              <div className="call-request-info">
+          <AnimatePresence>
+            {queue?.activeCallRequest && (
+              <motion.div
+                className="call-request-banner"
+                variants={fromEdge}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+              >
+                <div className="call-request-info">
                 <div className="call-request-icon">
                   <Icon name="userCheck" size={18} />
                 </div>
@@ -490,17 +509,24 @@ export default function DoctorDashboard() {
                   إلغاء الطلب
                 </AppButton>
               </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
           {isLoading && <p>جارٍ تحميل الطابور…</p>}
           {!isLoading && waiting.length === 0 && (
             <p>لا مرضى في الانتظار — سيظهر القادمون هنا تلقائيًا.</p>
           )}
-          {waiting.map((p, i) => (
-            <div
-              className={`doctor-queue-row ${p.isEmergency ? "emergency" : ""}`}
-              key={p.entryId}
-            >
+          <AnimatePresence initial={false}>
+            {waiting.map((p, i) => (
+              <motion.div
+                className={`doctor-queue-row ${p.isEmergency ? "emergency" : ""}`}
+                key={p.entryId}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, transition: TWEENS.exit }}
+                transition={SPRINGS.micro}
+              >
               <span className="queue-number">{arNum(i + 1)}</span>
               <span className={`patient-avatar a${i % 4}`}>{p.displayName.charAt(0)}</span>
               <div>
@@ -525,10 +551,11 @@ export default function DoctorDashboard() {
               >
                 تخطي
               </button>
-            </div>
+            </motion.div>
           ))}
-        </section>
-        <aside className="side-stack">
+          </AnimatePresence>
+        </motion.section>
+        <motion.aside className="side-stack" variants={listStagger}>
           <section className="card review-card">
             <div className="ai-icon">
               <Icon name="clipboardCheck" />
@@ -548,8 +575,8 @@ export default function DoctorDashboard() {
               مراجعة
             </AppButton>
           </section>
-        </aside>
-      </div>
+        </motion.aside>
+      </motion.div>
 
 
       {showReviewModal && (
