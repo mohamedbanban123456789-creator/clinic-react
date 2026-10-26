@@ -131,18 +131,17 @@ export function deriveShiftResult(differenceMinor: number): 'BALANCED' | 'SURPLU
   return differenceMinor > 0 ? 'SURPLUS' : 'DEFICIT';
 }
 
-/** DB-09 secretary discount floor (same rule as billing.support, re-derived read-only). */
+/**
+ * P1-1: Secretary discount ceiling removed. The secretary's discount is applied
+ * as given without an absolute or percentage cap. Reason and audit trail remain mandatory.
+ */
 function secretaryFloorAllowed(
-  standardFeeMinor: number,
-  finalFeeMinor: number,
-  maxDiscountMinor: number,
-  maxDiscountPct: number,
+  _standardFeeMinor: number,
+  _finalFeeMinor: number,
+  _maxDiscountMinor?: number,
+  _maxDiscountPct?: number,
 ): boolean {
-  const discountMinor = standardFeeMinor - finalFeeMinor;
-  if (discountMinor <= 0) return true;
-  const pctCap = Math.floor((standardFeeMinor * maxDiscountPct) / 100);
-  const allowed = Math.min(maxDiscountMinor, pctCap);
-  return discountMinor <= allowed;
+  return true;
 }
 
 /** Render failures as stable strings for the API `failures: string[]` contract. */
@@ -360,24 +359,8 @@ export async function checkShiftInvariants(
   }
 
   // --- APPX-D-6 secretary discount floor ------------------------------------
-  if (settings !== null) {
-    const actors = await db.user.findMany({ where: { role: 'SECRETARY' }, select: { id: true } });
-    const secretaryUsers = new Set(actors.map((u) => u.id));
-
-    for (const inv of invoices) {
-      if (inv.isComplimentary) continue;
-      if (!secretaryUsers.has(inv.createdByUserId)) continue;
-      const allowed = secretaryFloorAllowed(
-        inv.standardFeeMinor,
-        inv.finalFeeMinor,
-        settings.secretaryMaxDiscountMinor,
-        settings.secretaryMaxDiscountPct,
-      );
-      if (!allowed) {
-        push('APPX-D-6', `invoice ${inv.id} created by a SECRETARY breaches the discount floor (standard ${inv.standardFeeMinor} -> final ${inv.finalFeeMinor})`, [inv.id]);
-      }
-    }
-  }
+  // P1-1: Reception discount ceiling enforcement removed.
+  // The secretary's discount is applied as given (reason + audit still mandatory).
 
   const report: InvariantReport = { shiftId, passed: failures.length === 0, failures };
 

@@ -10,7 +10,7 @@ import { randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { startDisposableClinicDb } from './tests/db/disposable-db.js';
 
-const infoPath = process.env.QA_INFO_PATH ?? 'C:\\Users\\ASUS\\AppData\\Local\\Temp\\opencode\\clinic-qa-info.json';
+const infoPath = process.env.QA_INFO_PATH ?? 'd:\\Clinic Glm Last\\clinic-qa-info.json';
 
 console.log('[qa-boot] starting disposable postgres…');
 const db = await startDisposableClinicDb();

@@ -34,7 +34,6 @@ import {
   type WriteOffDto,
 } from './billing.dto.js';
 import {
-  assertSecretaryDiscountFloor,
   computeOutstanding,
   getOpenShiftOrThrow,
   loadClinicFees,
@@ -109,24 +108,10 @@ export async function checkout(
 
   const discounted = finalFee < standardFee;
 
-  // Discount governance runs BEFORE the money tx so a floor-block audit is
-  // committed even though no money moves.
+  // Discount governance runs BEFORE the money tx: reason (10-300 chars) is mandatory.
+  // P1-1: Secretary discount ceiling cap enforcement is removed; secretary discount
+  // is applied as given with mandatory reason + audit trail.
   if (feeTouched && discounted) {
-    try {
-      assertSecretaryDiscountFloor(actor.role, standardFee, finalFee, fees);
-    } catch (err) {
-      await writeBillingAuditStandalone(db, {
-        actorUserId: actor.userId,
-        actorRole: actor.role,
-        action: 'DISCOUNT_FLOOR_BLOCKED',
-        entityType: 'Invoice',
-        entityId: existing?.id ?? input.queueEntryId,
-        reasonText: 'secretary discount below floor',
-        idempotencyKey,
-        afterState: { queueEntryId: input.queueEntryId, standardFeeMinor: standardFee, finalFeeMinor: finalFee },
-      });
-      throw err;
-    }
     if (input.discountReason === undefined || input.discountReason.trim().length < 10) {
       throw new AppError('UNPROCESSABLE', 'discountReason is required (10-300 chars) when finalFeeMinor < standardFeeMinor', [
         { field: 'discountReason', issue: 'required when discounted', expected: '10-300 characters' },

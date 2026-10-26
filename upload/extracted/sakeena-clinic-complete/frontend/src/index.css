@@ -1432,6 +1432,149 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 }
 .data-row .row-action:hover { border-color: oklch(0.74 0.11 190 / 0.7); background: oklch(0.74 0.11 190 / 0.24); }
 .data-row .row-action:disabled { opacity: 0.5; cursor: default; }
+
+/* Settings Users Table layout — ensure 5 columns fit comfortably without clipping */
+.settings-users-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-users-table .data-head,
+.settings-users-table .data-row {
+  grid-template-columns: minmax(130px, 1.4fr) minmax(100px, 1fr) minmax(120px, 1.1fr) minmax(80px, 0.8fr) minmax(310px, 2.6fr);
+  min-width: 760px;
+}
+.settings-users-table .user-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.settings-users-table .user-row-actions .row-action {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Medications Bento Layout — fills/centers desktop viewport & stacks cleanly on mobile */
+.med-bento {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1.5rem;
+  align-items: stretch;
+  min-height: calc(100dvh - 140px);
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.med-bento .bento-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2.5rem;
+  min-height: 100%;
+}
+.med-bento .bento-main .patient-heading.compact {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+.med-bento .bento-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  justify-content: stretch;
+}
+.med-bento .bento-side .card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.med-bento .bento-inline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 1.5rem;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: oklch(0.74 0.16 190 / 0.14);
+  border: 1px solid oklch(0.74 0.16 190 / 0.35);
+  color: oklch(0.96 0.08 190);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.med-bento .bento-inline-link:hover {
+  background: oklch(0.74 0.16 190 / 0.25);
+  border-color: oklch(0.74 0.16 190 / 0.6);
+}
+.med-bento .bento-muted {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-top: 0.5rem;
+}
+.med-bento .bento-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 1rem;
+}
+.med-bento .bento-queue button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: oklch(1 0 0 / 0.04);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  color: var(--text-strong);
+  cursor: pointer;
+  width: 100%;
+  text-align: right;
+  transition: all 0.15s ease;
+}
+.med-bento .bento-queue button:hover {
+  background: oklch(1 0 0 / 0.08);
+  border-color: oklch(1 0 0 / 0.2);
+}
+.med-bento .bento-queue-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+}
+.med-bento .bento-tips {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.med-bento .bento-tips li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.med-bento .bento-tips li svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: oklch(0.74 0.16 190);
+}
+
+@media (max-width: 860px) {
+  .med-bento {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+}
+
 .table-footer {
   padding: 15px 22px;
   display: flex; justify-content: space-between;

@@ -4,7 +4,7 @@
  */
 
 export const arNum = (value: number): string =>
-  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(Math.round(value))
+  new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Math.round(value))
 
 /** Money label per design language: ج.م. (EGP). */
 export const money = (value: number): string => `${arNum(value)} ج.م.`
@@ -74,16 +74,12 @@ export const minutesSince = (iso: string | null | undefined): number => {
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000))
 }
 
-/** mm:ss timer using Arabic-Indic digits, e.g. ٢٣:٤٧ */
+/** mm:ss timer using crisp digits, e.g. 23:47 */
 export const arTimer = (totalSeconds: number): string => {
   const s = Math.max(0, Math.floor(totalSeconds))
   const mm = Math.floor(s / 60)
   const ss = s % 60
-  const twoDigits = String(ss).padStart(2, "0").replace(
-    /\d/g,
-    (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)],
-  )
-  return `${arNum(mm)}:${twoDigits}`
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
 }
 
 /** Short relative "منذ ٣ أسابيع" style for last-visit labels. */
@@ -117,9 +113,9 @@ export const toDateInput = (iso: string | null | undefined): string =>
   iso ? new Date(iso).toISOString().slice(0, 10) : ""
 
 export const arPercent = (part: number, total: number): string => {
-  if (total <= 0) return "٠٪"
+  if (total <= 0) return "0%"
   const pct = Math.round((part / total) * 100)
-  return `${arNum(pct)}٪`
+  return `${arNum(pct)}%`
 }
 
 /**

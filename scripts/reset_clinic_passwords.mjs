@@ -4,15 +4,20 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { readFileSync } from 'node:fs';
 
-const BACKEND_DIR = '/home/z/my-project/upload/extracted/sakeena-clinic-complete/backend';
-const require = createRequire(pathToFileURL(`${BACKEND_DIR}/package.json`));
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(__dirname, '..');
+const BACKEND_DIR = path.resolve(ROOT_DIR, 'upload', 'extracted', 'sakeena-clinic-complete', 'backend');
+const require = createRequire(pathToFileURL(path.join(BACKEND_DIR, 'package.json')));
 const argon2 = require('argon2');
 const { PrismaClient } = require('@prisma/client');
 
 // The disposable postgres gets a NEW port/credentials on every qa-boot —
 // always resolve the live URL from the qa-info JSON the backend just wrote.
 const qaInfo = JSON.parse(
-  readFileSync('/home/z/my-project/clinic-qa-info.json', 'utf8'),
+  readFileSync(path.join(ROOT_DIR, 'clinic-qa-info.json'), 'utf8'),
 );
 const DATABASE_URL = qaInfo.appUrl;
 process.env.DATABASE_URL = DATABASE_URL;
@@ -35,6 +40,26 @@ const db = new PrismaClient();
 try {
   for (const [identifier, plain] of Object.entries(NEW_PASSWORDS)) {
     const hash = await hashPassword(plain);
+    const existing = await db.user.findUnique({ where: { identifier } });
+    if (!existing) {
+      if (identifier === 'secretary') {
+        const doc = await db.user.findFirst({ where: { role: 'DOCTOR' } });
+        await db.user.create({
+          data: {
+            name: 'سارة محمود',
+            identifier: 'secretary',
+            passwordHash: hash,
+            role: 'SECRETARY',
+            gender: 'FEMALE',
+            isActive: true,
+            passwordMustChange: false,
+            createdByUserId: doc ? doc.id : null,
+          },
+        });
+        console.log('CREATED secretary OK');
+      }
+      continue;
+    }
     const updated = await db.user.update({
       where: { identifier },
       data: { passwordHash: hash, passwordMustChange: false, isActive: true },

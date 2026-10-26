@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Validate PLANNED token values against WCAG before applying to CSS."""
 
-exec(open('/home/z/my-project/scripts/contrast_audit.py').read().split('print("=== Effective')[0])
+import os
+audit_script = os.path.join(os.path.dirname(__file__), 'contrast_audit.py')
+exec(open(audit_script, encoding='utf-8').read().split('print("=== Effective')[0])
 
 # ---------- PLANNED NEW VALUES ----------
 # darker glass (mission: dark-theme glass opacity 0.65-0.8)

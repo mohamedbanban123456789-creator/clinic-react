@@ -4,9 +4,8 @@ Converts oklch tokens -> sRGB -> relative luminance -> contrast ratios,
 compositing translucent glass layers over realistic page backgrounds.
 """
 
-def oklch_to_srgb(L, C, h, alpha=1.0):
-    """oklch -> linear sRGB (approximate, good enough for contrast math)."""
-    # oklch -> oklab
+def oklch_to_linear_srgb(L, C, h, alpha=1.0):
+    """oklch -> linear sRGB (exact Björn Ottosson OKLab formula)."""
     import math
     h_rad = math.radians(h)
     a = C * math.cos(h_rad)
@@ -23,36 +22,39 @@ def oklch_to_srgb(L, C, h, alpha=1.0):
     g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
     bb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
     def clamp(x):
-        return 0.0 if x < 0 else (1.0 if x > 1 else x)
-    def gamma(x):
-        x = clamp(x)
-        return x / 12.92 if x <= 0.0031308 else ((x + 0.055) / 1.055) ** 2.4
-    return (gamma(r), gamma(g), gamma(bb), alpha)
+        return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
+    return (clamp(r), clamp(g), clamp(bb), float(alpha))
 
 
-def to_rgb01(t):
-    """linear tuple (already gamma-encoded approx from gamma()) -> 0..1"""
-    return t
+# Alias for backward-compat in callers: returns linear sRGB tuple (r, g, b, alpha)
+oklch_to_srgb = oklch_to_linear_srgb
 
 
-def rel_lum(rgb):
-    r, g, b, _ = rgb
+def linear_to_gamma_srgb(c):
+    """Convert linear channel 0..1 to standard gamma-encoded sRGB 0..1."""
+    return c * 12.92 if c <= 0.0031308 else 1.055 * (c ** (1.0 / 2.4)) - 0.055
+
+
+def rel_lum(linear_rgb):
+    """WCAG 2.1 relative luminance from linear sRGB channels."""
+    r, g, b, _ = linear_rgb
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def composite(fg, bg):
-    """alpha-composite two sRGB (gamma-space approx) tuples -> resulting tuple"""
+    """Alpha-composite two colors in linear sRGB space: fg over bg."""
     fr, fg_, fb, fa = fg
     br, bg_, bb, ba = bg
-    out_a = fa + ba * (1 - fa)
-    if out_a == 0:
-        return (0, 0, 0, 1)
+    out_a = fa + ba * (1.0 - fa)
+    if out_a == 0.0:
+        return (0.0, 0.0, 0.0, 1.0)
     def mix(fc, bc):
-        return (fc * fa + bc * ba * (1 - fa)) / out_a
-    return (mix(fr, br), mix(fg_, bg_), mix(fb, bb), 1.0)
+        return (fc * fa + bc * ba * (1.0 - fa)) / out_a
+    return (mix(fr, br), mix(fg_, bg_), mix(fb, bb), out_a)
 
 
 def contrast(c1, c2):
+    """WCAG 2.1 contrast ratio: (L1 + 0.05) / (L2 + 0.05) where L1 >= L2."""
     l1 = rel_lum(c1)
     l2 = rel_lum(c2)
     lo, hi = min(l1, l2), max(l1, l2)
@@ -60,7 +62,7 @@ def contrast(c1, c2):
 
 
 def fmt(ratio):
-    tag = "AAA" if ratio >= 7 else ("AA" if ratio >= 4.5 else ("AA-lg" if ratio >= 3 else "FAIL"))
+    tag = "AAA" if ratio >= 7.0 else ("AA" if ratio >= 4.5 else ("AA-lg" if ratio >= 3.0 else "FAIL"))
     return f"{ratio:5.2f}:1  {tag}"
 
 

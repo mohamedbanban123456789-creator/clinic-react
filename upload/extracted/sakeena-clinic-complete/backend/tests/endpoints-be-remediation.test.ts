@@ -652,7 +652,7 @@ function mockSettingsReq(role: 'DOCTOR' | 'SECRETARY'): Request {
   assert.equal(updated.standardFeeMinor, 75000, 'provided field updated');
   assert.equal(updated.audioRetentionDays, 14, 'provided field updated');
   assert.equal(updated.currency, 'USD', 'omitted field preserved');
-  assert.equal(updated.secretaryMaxDiscountPct, 10, 'omitted field preserved');
+  assert.equal((updated as Record<string, unknown>).secretaryMaxDiscountPct, undefined, 'ceiling fields no longer exposed');
 
   // GET fallback when no row exists yet (pre-seed).
   const { db: emptyDb } = makeDb({ settingsRow: null });

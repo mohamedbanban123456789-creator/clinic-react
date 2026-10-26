@@ -56,8 +56,8 @@ export interface ClinicSettingsDto {
   currency: string
   avgConsultDurationMin: number
   openingFloatMinor: number
-  secretaryMaxDiscountMinor: number
-  secretaryMaxDiscountPct: number
+  secretaryMaxDiscountMinor?: number
+  secretaryMaxDiscountPct?: number
   audioRetentionDays: number
 }
 

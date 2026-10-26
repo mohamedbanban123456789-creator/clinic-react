@@ -5,8 +5,6 @@ export interface PublicSettings {
   readonly currency: string;
   readonly avgConsultDurationMin: number;
   readonly openingFloatMinor: number;
-  readonly secretaryMaxDiscountMinor: number;
-  readonly secretaryMaxDiscountPct: number;
   readonly audioRetentionDays: number;
 }
 
@@ -15,8 +13,8 @@ export interface SettingsRow {
   readonly currency: string;
   readonly avgConsultDurationMin: number;
   readonly openingFloatMinor: number;
-  readonly secretaryMaxDiscountMinor: number;
-  readonly secretaryMaxDiscountPct: number;
+  readonly secretaryMaxDiscountMinor?: number | null;
+  readonly secretaryMaxDiscountPct?: number | null;
   readonly audioRetentionDays: number;
 }
 
@@ -27,8 +25,6 @@ export function toSecretSettingsDto(row: SettingsRow): SecretSafe<PublicSettings
     currency: row.currency,
     avgConsultDurationMin: row.avgConsultDurationMin,
     openingFloatMinor: row.openingFloatMinor,
-    secretaryMaxDiscountMinor: row.secretaryMaxDiscountMinor,
-    secretaryMaxDiscountPct: row.secretaryMaxDiscountPct,
     audioRetentionDays: row.audioRetentionDays,
   });
 }

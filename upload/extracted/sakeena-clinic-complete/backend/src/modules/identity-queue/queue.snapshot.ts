@@ -40,6 +40,7 @@ export interface QueueSnapshotOpsEntry {
   readonly estimatedWaitMin: number;
   readonly queueVersion: number;
   readonly hasPendingCallRequest?: boolean;
+  readonly completedAt?: string | null;
 }
 
 export interface QueueSnapshotOps {
@@ -89,7 +90,7 @@ async function readAvgMinutes(db: PrismaClient | Prisma.TransactionClient): Prom
   }
 }
 
-/** Dense ordered rows: the active IN_CONSULTATION entry first, then the WAITING pool. */
+/** Dense ordered rows: the active IN_CONSULTATION entry first, then WAITING pool, then COMPLETED/SKIPPED. */
 async function loadSnapshotRows(
   db: PrismaClient | Prisma.TransactionClient,
   shiftId: string,
@@ -108,11 +109,19 @@ async function loadSnapshotRows(
     orderBy,
     include: { patient: { select: { fullName: true } } },
   });
+  const completed = await db.queueEntry.findMany({
+    where: { shiftId, status: { in: ['COMPLETED', 'SKIPPED', 'NO_SHOW', 'ABANDONED'] } },
+    orderBy: [{ completedAt: { sort: 'desc' as const, nulls: 'last' as const } }, { checkedInAt: 'asc' as const }],
+    include: { patient: { select: { fullName: true } } },
+  });
   const rows: SnapshotRow[] = [];
   if (active !== null) {
     rows.push({ entry: active, displayName: active.patient.fullName });
   }
   for (const entry of pool) {
+    rows.push({ entry, displayName: entry.patient.fullName });
+  }
+  for (const entry of completed) {
     rows.push({ entry, displayName: entry.patient.fullName });
   }
   return rows;
@@ -207,6 +216,7 @@ export async function buildQueueSnapshots(
       estimatedWaitMin,
       queueVersion: shift.queueVersion,
       hasPendingCallRequest,
+      completedAt: entry.completedAt === null ? null : entry.completedAt.toISOString(),
     };
 
     opsEntries.push(base);

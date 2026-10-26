@@ -21,34 +21,48 @@ export interface QueueState {
   queueVersion: number
 }
 
-function snapshotToQueueList(snapshot: QueueSnapshot): QueueListDto {
+function snapshotToQueueList(snapshot: QueueSnapshot, existing?: QueueListDto | null): QueueListDto {
   const waitingFirst = snapshot.entries.find((e) => e.status === "WAITING")
+  const snapEntries: QueueEntryDto[] = snapshot.entries.map((e) => ({
+    entryId: e.entryId,
+    patientId: e.patientId,
+    displayName: e.displayName,
+    status: e.status as QueueEntryDto["status"],
+    position: e.position,
+    isEmergency: e.isEmergency,
+    emergencyReasonCode: null,
+    checkedInAt: e.checkedInAt,
+    calledAt: (e as any).calledAt ?? null,
+    completedAt: (e as any).completedAt ?? null,
+    skippedAt: null,
+    noShowAt: null,
+    abandonAt: null,
+    estimatedWaitMin: Math.round(e.estimatedWaitMin),
+    debtAckAt: null,
+    debtAlert: null,
+    queueVersion: e.queueVersion,
+    hasPendingCallRequest:
+      e.hasPendingCallRequest ?? (snapshot.activeCallRequest?.queueEntryId === e.entryId),
+  }))
+
+  const entryMap = new Map<string, QueueEntryDto>()
+  if (existing?.entries) {
+    for (const item of existing.entries) {
+      entryMap.set(item.entryId, item)
+    }
+  }
+  for (const item of snapEntries) {
+    entryMap.set(item.entryId, item)
+  }
+
+  const entries = Array.from(entryMap.values())
+
   return {
     shiftId: snapshot.clinicDayId,
     queueVersion: snapshot.queueVersion,
     estimatedWaitMin: waitingFirst ? Math.round(waitingFirst.estimatedWaitMin) : 0,
     activeCallRequest: snapshot.activeCallRequest ?? null,
-    entries: snapshot.entries.map((e) => ({
-      entryId: e.entryId,
-      patientId: e.patientId,
-      displayName: e.displayName,
-      status: e.status as QueueEntryDto["status"],
-      position: e.position,
-      isEmergency: e.isEmergency,
-      emergencyReasonCode: null,
-      checkedInAt: e.checkedInAt,
-      calledAt: e.calledAt ?? null,
-      completedAt: null,
-      skippedAt: null,
-      noShowAt: null,
-      abandonAt: null,
-      estimatedWaitMin: Math.round(e.estimatedWaitMin),
-      debtAckAt: null,
-      debtAlert: null,
-      queueVersion: e.queueVersion,
-      hasPendingCallRequest:
-        e.hasPendingCallRequest ?? (snapshot.activeCallRequest?.queueEntryId === e.entryId),
-    })),
+    entries: entries.length > 0 ? entries : snapEntries,
   }
 }
 
@@ -64,6 +78,13 @@ export function useQueue(): QueueState {
   })
 
   useEffect(() => {
+    if (rest.data && rest.data.queueVersion >= versionRef.current) {
+      versionRef.current = rest.data.queueVersion
+      setLive(rest.data)
+    }
+  }, [rest.data])
+
+  useEffect(() => {
     return queryClient.getQueryCache().subscribe((event) => {
       if (event.type === "updated" && event.query.queryKey[0] === "queue") {
         const data = event.query.state.data as QueueListDto | undefined
@@ -77,9 +98,11 @@ export function useQueue(): QueueState {
   useQueueSnapshot((snapshot) => {
     if (snapshot.queueVersion >= versionRef.current) {
       versionRef.current = snapshot.queueVersion
-      const mapped = snapshotToQueueList(snapshot)
+      const currentCache = queryClient.getQueryData<QueueListDto>(["queue", "current"])
+      const mapped = snapshotToQueueList(snapshot, currentCache || live)
       setLive(mapped)
       queryClient.setQueryData(["queue", "current"], mapped)
+      void rest.refetch()
       // Invalidate financial/queue-dependent queries on queue changes.
       void queryClient.invalidateQueries({ queryKey: ["billing"] })
       void queryClient.invalidateQueries({ queryKey: ["shifts"] })
@@ -107,6 +130,7 @@ export function useQueueInvalidation() {
   const queryClient = useQueryClient()
   return () => {
     void queryClient.invalidateQueries({ queryKey: ["queue"] })
+    void queryClient.refetchQueries({ queryKey: ["queue", "current"] })
     void queryClient.invalidateQueries({ queryKey: ["billing"] })
     void queryClient.invalidateQueries({ queryKey: ["shifts"] })
   }

@@ -34,8 +34,6 @@ export async function getPublicSettings(db: PrismaClient = prisma): Promise<Secr
       currency: row.currency,
       avgConsultDurationMin: row.avgConsultDurationMin,
       openingFloatMinor: row.openingFloatMinor,
-      secretaryMaxDiscountMinor: row.secretaryMaxDiscountMinor,
-      secretaryMaxDiscountPct: row.secretaryMaxDiscountPct,
       audioRetentionDays: row.audioRetentionDays,
     });
   } catch {
@@ -72,8 +70,8 @@ export async function updatePublicSettings(
     currency: input.currency ?? base.currency,
     avgConsultDurationMin: input.avgConsultDurationMin ?? base.avgConsultDurationMin,
     openingFloatMinor: input.openingFloatMinor ?? base.openingFloatMinor,
-    secretaryMaxDiscountMinor: input.secretaryMaxDiscountMinor ?? base.secretaryMaxDiscountMinor,
-    secretaryMaxDiscountPct: input.secretaryMaxDiscountPct ?? base.secretaryMaxDiscountPct,
+    secretaryMaxDiscountMinor: base.secretaryMaxDiscountMinor,
+    secretaryMaxDiscountPct: base.secretaryMaxDiscountPct,
     audioRetentionDays: input.audioRetentionDays ?? base.audioRetentionDays,
   };
   const row = await db.clinicSettings.upsert({
@@ -86,8 +84,6 @@ export async function updatePublicSettings(
     currency: row.currency,
     avgConsultDurationMin: row.avgConsultDurationMin,
     openingFloatMinor: row.openingFloatMinor,
-    secretaryMaxDiscountMinor: row.secretaryMaxDiscountMinor,
-    secretaryMaxDiscountPct: row.secretaryMaxDiscountPct,
     audioRetentionDays: row.audioRetentionDays,
   });
 }

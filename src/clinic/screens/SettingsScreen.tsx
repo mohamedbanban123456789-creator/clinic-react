@@ -32,8 +32,6 @@ export default function SettingsScreen() {
     standardFee: 0,
     currency: "EGP",
     avgConsultDurationMin: 20,
-    secretaryMaxDiscount: 0,
-    secretaryMaxDiscountPct: 10,
     openingFloat: 0,
     audioRetentionDays: 30,
   })
@@ -45,8 +43,6 @@ export default function SettingsScreen() {
         standardFee: s.standardFeeMinor / 100,
         currency: s.currency,
         avgConsultDurationMin: s.avgConsultDurationMin,
-        secretaryMaxDiscount: s.secretaryMaxDiscountMinor / 100,
-        secretaryMaxDiscountPct: s.secretaryMaxDiscountPct,
         openingFloat: s.openingFloatMinor / 100,
         audioRetentionDays: s.audioRetentionDays,
       })
@@ -59,8 +55,6 @@ export default function SettingsScreen() {
         standardFeeMinor: Math.round(form.standardFee * 100),
         currency: form.currency.trim().toUpperCase(),
         avgConsultDurationMin: Math.round(form.avgConsultDurationMin),
-        secretaryMaxDiscountMinor: Math.round(form.secretaryMaxDiscount * 100),
-        secretaryMaxDiscountPct: Math.round(form.secretaryMaxDiscountPct),
         openingFloatMinor: Math.round(form.openingFloat * 100),
         audioRetentionDays: Math.round(form.audioRetentionDays),
       }),
@@ -158,7 +152,7 @@ export default function SettingsScreen() {
               saveMutation.mutate()
             }}
           >
-            <div className="form-row thirds">
+            <div className="form-row">
               <label className="field money-field">
                 <span>رسوم الزيارة الأساسية</span>
                 <input
@@ -170,12 +164,16 @@ export default function SettingsScreen() {
               </label>
               <label className="field">
                 <span>العملة</span>
-                <input
+                <select
                   value={form.currency}
                   onChange={(e) => setForm({ ...form, currency: e.target.value })}
-                  placeholder="EGP"
-                />
+                >
+                  <option value="EGP">ج.م. (EGP)</option>
+                  <option value="USD">دولار أمريكي (USD)</option>
+                </select>
               </label>
+            </div>
+            <div className="form-row">
               <label className="field">
                 <span>متوسط مدة الكشف (دقيقة)</span>
                 <input
@@ -183,29 +181,6 @@ export default function SettingsScreen() {
                   value={form.avgConsultDurationMin}
                   onChange={(e) =>
                     setForm({ ...form, avgConsultDurationMin: Number(e.target.value) })
-                  }
-                />
-              </label>
-            </div>
-            <div className="form-row thirds">
-              <label className="field money-field">
-                <span>أقصى خصم للاستقبال (قيمة)</span>
-                <input
-                  type="number"
-                  value={form.secretaryMaxDiscount}
-                  onChange={(e) =>
-                    setForm({ ...form, secretaryMaxDiscount: Number(e.target.value) })
-                  }
-                />
-                <i>ج.م.</i>
-              </label>
-              <label className="field">
-                <span>أقصى خصم للاستقبال (٪)</span>
-                <input
-                  type="number"
-                  value={form.secretaryMaxDiscountPct}
-                  onChange={(e) =>
-                    setForm({ ...form, secretaryMaxDiscountPct: Number(e.target.value) })
                   }
                 />
               </label>
@@ -240,7 +215,7 @@ export default function SettingsScreen() {
             حساب استقبال جديد
           </AppButton>
         </div>
-        <div className="data-table">
+        <div className="data-table settings-users-table">
           <div className="data-head">
             <span>الاسم</span>
             <span>المعرف</span>
@@ -257,7 +232,7 @@ export default function SettingsScreen() {
               <span className={`method-pill ${u.isActive ? "" : "due-text"}`}>
                 {u.isActive ? "نشط" : "معطل"}
               </span>
-              <span className="row-actions" style={{ display: "flex", gap: "6px" }}>
+              <span className="row-actions user-row-actions">
                 <button
                   className="row-action"
                   onClick={() => {
